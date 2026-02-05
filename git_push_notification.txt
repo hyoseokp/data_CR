@@ -1,6 +1,0 @@
-**Git Push Failed**
-
-Time: 2026-02-04 13:56:32
-Repository: https://github.com/hyoseokp/data_CR
-
-Error occurred!

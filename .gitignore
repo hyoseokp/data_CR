@@ -1,0 +1,6 @@
+.ipynb_checkpoints/
+Untitled*.ipynb
+temp_cell*.py
+progress_checkpoint_*.txt
+spectra_latest_valid_*.npy
+git_push_notification.txt
