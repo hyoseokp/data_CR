@@ -195,7 +195,7 @@ class DashboardServer:
         try:
             config = uvicorn.Config(
                 app=self.app,
-                host="127.0.0.1",
+                host="0.0.0.0",
                 port=self.port,
                 log_level="warning",
                 access_log=False,
@@ -216,6 +216,14 @@ class DashboardServer:
         self.running = True
         self.server_thread = threading.Thread(target=self._run_server, daemon=True)
         self.server_thread.start()
+
+        # 서버 시작 대기 (최대 5초)
+        import time
+        for _ in range(50):
+            if self.loop is not None:
+                break
+            time.sleep(0.1)
+
         logger.info(f"Dashboard server started on port {self.port}")
 
     def stop(self):

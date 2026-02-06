@@ -1,0 +1,91 @@
+name: Deploy Dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [ master, main ]
+  schedule:
+    - cron: '0 */6 * * *'  # 6시간마다 실행
+
+jobs:
+  train-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install torch torchvision torchaudio
+        pip install pyyaml tensorboard
+
+    - name: Download data
+      run: |
+        # 데이터 다운로드 (예: GitHub Release에서)
+        mkdir -p data_CR-main
+        # wget https://github.com/your-repo/releases/download/data/spectra_latest_0.npy -O data_CR-main/spectra_latest_0.npy
+
+    - name: Train model
+      run: |
+        cd CR_recon
+        python train.py --config configs/default.yaml
+      timeout-minutes: 1440  # 24시간
+
+    - name: Generate dashboard HTML
+      run: |
+        cd CR_recon
+        python -c "
+        import json
+        from pathlib import Path
+
+        # 훈련 로그 읽기
+        log_data = []
+        with open('outputs/train_log.txt', 'r') as f:
+            for line in f:
+                if '[EPOCH]' in line:
+                    log_data.append(line.strip())
+
+        # HTML 생성
+        html = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"UTF-8\">
+    <title>MetaSpec Training Results</title>
+    <script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .container { background: white; border-radius: 8px; padding: 20px; }
+        h1 { color: #333; }
+        .log-section { margin: 20px 0; }
+        pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class=\"container\">
+        <h1>🎯 MetaSpec Training Results</h1>
+        <p>Last updated: $(date)</p>
+        <div class=\"log-section\">
+            <h2>Training Log</h2>
+            <pre>
+        ''' + '\\n'.join(log_data[-50:]) + '''
+            </pre>
+        </div>
+    </div>
+</body>
+</html>'''
+
+        Path('../../docs/index.html').parent.mkdir(parents=True, exist_ok=True)
+        with open('../../docs/index.html', 'w') as f:
+            f.write(html)
+        "
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: \${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs

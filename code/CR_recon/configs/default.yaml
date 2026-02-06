@@ -29,12 +29,12 @@ model:
 loss:
   name: "mse_pearson"
   params:
-    w_mse: 1.0
-    w_corr: 0.2
+    w_mse: 0.5
+    w_corr: 0.5
 
 training:
   epochs: 300
-  lr: 0.001
+  lr: 0.003
   weight_decay: 0.005
   grad_clip: 1.0
   use_amp: true

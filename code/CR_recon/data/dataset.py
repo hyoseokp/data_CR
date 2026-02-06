@@ -11,7 +11,15 @@ from pathlib import Path
 
 class CRDataset(Dataset):
     """
-    128x128 구조 이미지 → BGGR 2x2 스펙트럼 예측 데이터셋
+    128x128 구조 이미지 → Bayer 2x2 스펙트럼 (30 bins) 예측 데이터셋
+
+    데이터 정제 파이프라인:
+    1. 원본: struct (N, 1, 128, 128), spectra (N, 3, 301)
+    2. 필터링: 유효한 샘플만 선택 (spectra ≠ 0)
+    3. Bayer 변환: spectra (M, 3, 301) → (M, 2, 2, 30)
+       - [0,0]=R, [0,1]=G, [1,0]=G, [1,1]=B
+       - 동시에 301 bin → 30 bin 다운샘플
+    4. 180도 증강: Bayer의 R과 B 위치 교환 (augment=True일 때)
     """
 
     def __init__(self, cfg, augment=False):
@@ -29,40 +37,105 @@ class CRDataset(Dataset):
         self.out_len = cfg.get("out_len", 30)
         self.map_to_pm1 = cfg.get("map_to_pm1", True)
 
-        # 데이터 경로 (config 파일 기준 상대경로)
-        cfg_dir = Path(__file__).parent.parent.parent  # CR_recon/
-        struct_paths = [cfg_dir / p for p in cfg["struct_files"]]
-        spectra_paths = [cfg_dir / p for p in cfg["spectra_files"]]
+        # 데이터 경로
+        cfg_dir = Path(__file__).parent.parent  # CR_recon/
 
-        # numpy mmap으로 로드 (메모리 효율적)
-        structs = [np.load(str(p), mmap_mode="r") for p in struct_paths]
-        spectra = [np.load(str(p), mmap_mode="r") for p in spectra_paths]
+        # 정제된 데이터 경로 (사전에 전처리된 Bayer 파일)
+        # 위치: CR_recon/dataset/bayer/
+        bayer_dir = cfg_dir / "dataset" / "bayer"
+        struct_bayer_paths = [
+            bayer_dir / "struct_0.npy",
+            bayer_dir / "struct_1.npy"
+        ]
+        bayer_paths = [
+            bayer_dir / "bayer_0.npy",
+            bayer_dir / "bayer_1.npy"
+        ]
+        bayer_rotated_paths = [
+            bayer_dir / "bayer_rotated_0.npy",
+            bayer_dir / "bayer_rotated_1.npy"
+        ]
 
-        # concat (여러 파일 합치기)
-        struct_all = np.concatenate(structs, axis=0)  # (N, 1, 128, 128)
-        spectra_all = np.concatenate(spectra, axis=0)  # (N, 3, 301)
+        # 정제된 데이터 있는지 확인
+        if all(p.exists() for p in struct_bayer_paths + bayer_paths + bayer_rotated_paths):
+            # 정제된 데이터 로드 (이미 필터링되고 변환됨)
+            structs_valid = [np.load(str(p), mmap_mode="r") for p in struct_bayer_paths]
+            spectra_valid = [np.load(str(p), mmap_mode="r") for p in bayer_paths]
+            spectra_rotated_list = [np.load(str(p), mmap_mode="r") for p in bayer_rotated_paths]
 
-        # 데이터 정제: 0이 아닌 유효한 샘플만 필터링
-        # spectra에서 모든 값이 0인 샘플을 제외
-        valid_indices = np.where(np.any(spectra_all != 0, axis=(1, 2)))[0]
-        struct_valid = struct_all[valid_indices]  # (M, 1, 128, 128)
-        spectra_valid = spectra_all[valid_indices]  # (M, 3, 301)
+            struct_valid = np.concatenate(structs_valid, axis=0)  # (M, 1, 128, 128)
+            spectra_valid = np.concatenate(spectra_valid, axis=0)  # (M, 2, 2, out_len)
+            bayer_rotated_valid = np.concatenate(spectra_rotated_list, axis=0)  # (M, 2, 2, out_len)
+        else:
+            # 정제된 데이터 없으면 원본에서 즉시 정제
+            struct_paths = [cfg_dir / p for p in cfg["struct_files"]]
+            spectra_paths = [cfg_dir / p for p in cfg["spectra_files"]]
 
-        # 180도 회전된 버전 생성 (대각선 대칭 구조 활용)
+            # numpy mmap으로 로드 (메모리 효율적)
+            structs = [np.load(str(p), mmap_mode="r") for p in struct_paths]
+            spectra = [np.load(str(p), mmap_mode="r") for p in spectra_paths]
+
+            # concat (여러 파일 합치기)
+            struct_all = np.concatenate(structs, axis=0)  # (N, 1, 128, 128)
+            spectra_all = np.concatenate(spectra, axis=0)  # (N, 3, 301)
+
+            # 데이터 정제: 0이 아닌 유효한 샘플만 필터링
+            valid_indices = np.where(np.any(spectra_all != 0, axis=(1, 2)))[0]
+            struct_valid = struct_all[valid_indices]  # (M, 1, 128, 128)
+            spectra_valid = spectra_all[valid_indices]  # (M, 3, 301)
+
+            # spectra를 (3, 301) → (2, 2, out_len) Bayer 패턴으로 변환
+            spectra_valid = self._convert_to_bayer(spectra_valid)  # (M, 2, 2, out_len)
+
+            # 180도 회전된 버전 생성
+            bayer_rotated_valid = np.zeros_like(spectra_valid)
+            bayer_rotated_valid[:, 0, 0, :] = spectra_valid[:, 1, 1, :]
+            bayer_rotated_valid[:, 0, 1, :] = spectra_valid[:, 0, 1, :]
+            bayer_rotated_valid[:, 1, 0, :] = spectra_valid[:, 1, 0, :]
+            bayer_rotated_valid[:, 1, 1, :] = spectra_valid[:, 0, 0, :]
+
+        # 180도 회전된 구조 이미지 생성 (대각선 대칭 구조 활용)
         struct_rotated = np.flip(struct_valid, axis=(2, 3)).copy()  # (M, 1, 128, 128)
-        # spectra는 RGB→BGGR 변환 시 B/R이 교환되므로, 180도 회전에서도 B/R 교환
-        spectra_rotated = spectra_valid.copy()
-        spectra_rotated[[0, 2], :] = spectra_valid[[2, 0], :]  # R과 B 교환 (axis=0의 0, 2 위치)
 
         # 원본 + 180도 회전 버전 병합
         if self.augment:
             self.struct = np.concatenate([struct_valid, struct_rotated], axis=0)  # (2M, 1, 128, 128)
-            self.spectra = np.concatenate([spectra_valid, spectra_rotated], axis=0)  # (2M, 3, 301)
+            self.spectra = np.concatenate([spectra_valid, bayer_rotated_valid], axis=0)  # (2M, 2, 2, out_len)
         else:
             self.struct = struct_valid
-            self.spectra = spectra_valid
+            self.spectra = spectra_valid  # (M, 2, 2, out_len)
 
         self.n = len(self.struct)
+
+    def _convert_to_bayer(self, spectra):
+        """
+        (M, 3, 301) → (M, 2, 2, out_len) Bayer 패턴 변환
+
+        입력: spectra (M, 3, 301) = [R, G, B] × 301파장
+        출력: bayer (M, 2, 2, out_len) = [[R, G], [G, B]] × out_len파장
+        """
+        M = len(spectra)
+        bayer = np.zeros((M, 2, 2, self.out_len), dtype=np.float32)
+
+        # 다운샘플 indices
+        indices = np.linspace(0, 300, self.out_len, dtype=int)
+
+        # 배치 처리
+        for i in range(M):
+            spec = spectra[i].astype(np.float32)  # (3, 301)
+            r, g, b = spec[0], spec[1], spec[2]
+
+            # 먼저 (2, 2, 301) Bayer 패턴 구성
+            bggr_full = np.zeros((2, 2, 301), dtype=np.float32)
+            bggr_full[0, 0, :] = r  # [0, 0] = R
+            bggr_full[0, 1, :] = g  # [0, 1] = G
+            bggr_full[1, 0, :] = g  # [1, 0] = G
+            bggr_full[1, 1, :] = b  # [1, 1] = B
+
+            # 다운샘플 (301 → out_len)
+            bayer[i] = bggr_full[:, :, indices]
+
+        return bayer
 
     def __len__(self):
         return self.n
@@ -71,12 +144,12 @@ class CRDataset(Dataset):
         """
         Returns: (struct, spectrum)
           - struct: (1, 128, 128) float32
-          - spectrum: (2, 2, out_len) float32 BGGR
+          - spectrum: (2, 2, out_len) float32 Bayer pattern
 
         augment_180이 활성화된 경우:
           - idx 0~M-1: 원본 데이터
           - idx M~2M-1: 180도 회전된 데이터
-        (데이터는 이미 로드 시점에 준비됨)
+        (Bayer 패턴 변환은 이미 __init에서 수행됨)
         """
         # 구조 이미지: (1, 128, 128) uint8 → float32
         struct = self.struct[idx].astype(np.float32)  # (1, 128, 128)
@@ -84,29 +157,11 @@ class CRDataset(Dataset):
         if self.map_to_pm1:
             struct = struct * 2.0 - 1.0  # [0,1] → [-1,1]
 
-        # 스펙트럼: (3, 301) float32
-        spec = self.spectra[idx].astype(np.float32)  # (3, 301)
+        # 스펙트럼: 이미 (2, 2, out_len) Bayer 패턴으로 변환됨
+        bggr = self.spectra[idx].astype(np.float32)  # (2, 2, out_len)
 
         # 부호 변경: 음수 데이터를 양수로 변환
-        spec = -spec
-
-        # RGB → BGGR 변환 및 2x2 형태로 reshape
-        # spec: [R, G, B] (ch=3, L=301)
-        # BGGR: [0,0]=B, [0,1]=G, [1,0]=G, [1,1]=R
-        r, g, b = spec[0], spec[1], spec[2]
-
-        # Downsample 301 → out_len (uniform spacing)
-        indices = np.linspace(0, 300, self.out_len, dtype=int)
-        r = r[indices]
-        g = g[indices]
-        b = b[indices]
-
-        # BGGR (2, 2, out_len) 구성
-        bggr = np.zeros((2, 2, self.out_len), dtype=np.float32)
-        bggr[0, 0, :] = b  # [0, 0] = B
-        bggr[0, 1, :] = g  # [0, 1] = G
-        bggr[1, 0, :] = g  # [1, 0] = G
-        bggr[1, 1, :] = r  # [1, 1] = R
+        bggr = -bggr
 
         return torch.from_numpy(struct), torch.from_numpy(bggr)
 
