@@ -1,0 +1,50 @@
+seed: 42
+
+data:
+  struct_files:
+    - "../data_CR-main/binary_dataset_128_0.npy"
+    - "../data_CR-main/binary_dataset_128_1.npy"
+  spectra_files:
+    - "../data_CR-main/spectra_latest_0.npy"
+    - "../data_CR-main/spectra_latest_1.npy"
+  out_len: 30
+  map_to_pm1: true
+  augment_180: true
+  train_ratio: 0.95
+  batch_size: 64
+  num_workers: 0
+
+model:
+  name: "cnn_xattn"
+  params:
+    out_len: 30
+    d_model: 256
+    nhead: 8
+    dec_layers: 4
+    cnn_dropout: 0.05
+    tr_dropout: 0.1
+    head_dropout: 0.2
+    use_circular_padding: true
+
+loss:
+  name: "mse_pearson"
+  params:
+    w_mse: 1.0
+    w_corr: 0.2
+
+training:
+  epochs: 300
+  lr: 0.001
+  weight_decay: 0.005
+  grad_clip: 1.0
+  use_amp: true
+  warmup_ratio: 0.05
+  save_every: 10
+
+dashboard:
+  enabled: true
+  port: 8501
+
+output:
+  dir: "outputs/"
+  log_file: "train_log.txt"

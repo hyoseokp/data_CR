@@ -1,0 +1,352 @@
+"""
+Trainer: 학습 엔진
+config 기반으로 모델/loss/데이터를 조립하여 학습을 실행한다.
+"""
+import os
+import math
+import time
+from pathlib import Path
+from typing import Callable, List, Optional, Dict, Any
+
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LambdaLR
+from tqdm import tqdm
+
+from data import create_dataloaders
+from models import get_model
+from losses import get_loss
+from dashboard import DashboardServer
+from dashboard.hook import DashboardHook
+
+
+class Trainer:
+    """학습 엔진: config 기반 모델/loss/데이터 조립 및 학습 실행."""
+
+    def __init__(self, cfg: Dict[str, Any], device: Optional[torch.device] = None):
+        """
+        cfg: 전체 config dict (common_context_prompt.md의 Config Schema)
+        device: torch.device (기본: cuda if available else cpu)
+        """
+        self.cfg = cfg
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # 출력 디렉토리
+        self.output_dir = Path(cfg["output"]["dir"])
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 로그 파일
+        self.log_file = self.output_dir / cfg["output"]["log_file"]
+
+        # seed 설정
+        seed = cfg.get("seed", 42)
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        if self.device.type == "cuda":
+            torch.cuda.manual_seed(seed)
+
+        # 데이터 로더
+        self.train_loader, self.val_loader = create_dataloaders(cfg)
+
+        # 모델
+        model_name = cfg["model"]["name"]
+        model_params = cfg["model"]["params"]
+        self.model = get_model(model_name, **model_params).to(self.device)
+
+        # Loss 함수
+        loss_name = cfg["loss"]["name"]
+        loss_params = cfg["loss"]["params"]
+        self.loss_fn = get_loss(loss_name, **loss_params)
+
+        # Optimizer
+        lr = cfg["training"]["lr"]
+        weight_decay = cfg["training"]["weight_decay"]
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+            betas=(0.9, 0.95),
+            eps=1e-8
+        )
+
+        # Scheduler: cosine annealing with linear warmup
+        total_steps = cfg["training"]["epochs"] * len(self.train_loader)
+        warmup_steps = int(cfg["training"]["warmup_ratio"] * total_steps)
+
+        def lr_lambda(step: int):
+            if step < warmup_steps:
+                return float(step + 1) / float(max(1, warmup_steps))
+            t = (step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.5 * (1.0 + math.cos(math.pi * t))
+
+        self.scheduler = LambdaLR(self.optimizer, lr_lambda=lr_lambda)
+
+        # AMP (Automatic Mixed Precision)
+        self.use_amp = cfg["training"]["use_amp"] and self.device.type == "cuda"
+        if self.use_amp:
+            self.scaler = torch.amp.GradScaler("cuda")
+        else:
+            self.scaler = None
+
+        # Gradient clipping
+        self.grad_clip = cfg["training"]["grad_clip"]
+
+        # Checkpoint 관련
+        self.ckpt_best = self.output_dir / f"{model_name}_best.pt"
+        self.ckpt_last = self.output_dir / f"{model_name}_last.pt"
+        self.save_every = cfg["training"]["save_every"]
+        self.best_val_loss = float("inf")
+
+        # Callbacks (대시보드 hook 등)
+        self.callbacks: List[Callable] = []
+
+        # 데이터 통계 계산
+        self.data_stats = {
+            "train_size": len(self.train_loader.dataset),
+            "val_size": len(self.val_loader.dataset),
+            "total_size": len(self.train_loader.dataset) + len(self.val_loader.dataset),
+            "batch_size": cfg["data"]["batch_size"],
+        }
+
+        # Dashboard 서버
+        self.dashboard_server = None
+        if cfg.get("dashboard", {}).get("enabled", False):
+            try:
+                port = cfg["dashboard"]["port"]
+                self.dashboard_server = DashboardServer(port=port)
+                # 초기 데이터 통계 설정
+                self.dashboard_server.state["data_stats"] = self.data_stats
+                self.add_callback(DashboardHook(self))
+            except Exception as e:
+                self.log(f"[WARNING] Failed to initialize dashboard server: {e}", also_console=True)
+                self.dashboard_server = None
+
+        # 학습 통계
+        self.train_losses = []
+        self.val_losses = []
+        self.current_epoch = 0
+
+    def add_callback(self, fn: Callable):
+        """Callback 함수 등록 (epoch별 호출)."""
+        self.callbacks.append(fn)
+
+    def log(self, msg: str, also_console: bool = True):
+        """로그 파일 및 콘솔에 기록."""
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {msg}"
+        with open(self.log_file, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        if also_console:
+            print(line)
+
+    def train_one_epoch(self) -> float:
+        """한 epoch 학습, 평균 train loss 반환."""
+        self.model.train()
+        total_loss = 0.0
+
+        pbar = tqdm(
+            self.train_loader,
+            desc=f"Epoch {self.current_epoch+1}",
+            leave=True,
+            ncols=100,
+            disable=False
+        )
+
+        total_batches = len(self.train_loader)
+        for batch_idx, (x, y) in enumerate(pbar):
+            x = x.to(self.device, non_blocking=True)
+            y = y.to(self.device, non_blocking=True)
+
+            self.optimizer.zero_grad(set_to_none=True)
+
+            if self.use_amp:
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    out = self.model(x)
+                    loss = self.loss_fn(out, y)
+
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                if self.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                out = self.model(x)
+                loss = self.loss_fn(out, y)
+                loss.backward()
+                if self.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                self.optimizer.step()
+
+            self.scheduler.step()
+
+            total_loss += float(loss.item())
+            lr_now = self.optimizer.param_groups[0]["lr"]
+            pbar.set_postfix({
+                "loss": f"{loss.item():.6f}",
+                "lr": f"{lr_now:.2e}"
+            })
+
+            # 배치 진행 상황 대시보드에 전송 (10 배치마다 1회, 마지막 배치는 항상 전송)
+            should_send = (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == total_batches
+            if should_send and self.dashboard_server and self.dashboard_server.is_running():
+                self.dashboard_server.push_progress({
+                    "stage": "train",
+                    "epoch": self.current_epoch,
+                    "total_epochs": self.cfg["training"]["epochs"],
+                    "batch": batch_idx + 1,
+                    "total_batches": total_batches,
+                    "current_loss": float(loss.item()),
+                    "lr": lr_now
+                })
+
+        avg_loss = total_loss / max(1, len(self.train_loader))
+        return avg_loss
+
+    @torch.no_grad()
+    def validate(self) -> float:
+        """검증, 평균 val loss 반환."""
+        self.model.eval()
+        total_loss = 0.0
+
+        pbar = tqdm(
+            self.val_loader,
+            desc="Validation",
+            leave=False,
+            ncols=100,
+            disable=False
+        )
+
+        total_batches = len(self.val_loader)
+        for batch_idx, (x, y) in enumerate(pbar):
+            x = x.to(self.device, non_blocking=True)
+            y = y.to(self.device, non_blocking=True)
+
+            out = self.model(x)
+            loss = self.loss_fn(out, y)
+            total_loss += float(loss.item())
+
+            # 배치 진행 상황 대시보드에 전송 (5 배치마다 1회, 마지막 배치는 항상 전송)
+            should_send = (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == total_batches
+            if should_send and self.dashboard_server and self.dashboard_server.is_running():
+                self.dashboard_server.push_progress({
+                    "stage": "val",
+                    "epoch": self.current_epoch,
+                    "total_epochs": self.cfg["training"]["epochs"],
+                    "batch": batch_idx + 1,
+                    "total_batches": total_batches,
+                    "current_loss": float(loss.item())
+                })
+
+        avg_loss = total_loss / max(1, len(self.val_loader))
+        return avg_loss
+
+    def save_checkpoint(self, is_best: bool = False, periodic: bool = False):
+        """체크포인트 저장."""
+        ckpt = {
+            "model": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "epoch": self.current_epoch,
+            "val_loss": self.val_losses[-1] if self.val_losses else float("inf"),
+            "best_val_loss": self.best_val_loss,
+        }
+
+        if is_best:
+            torch.save(ckpt, self.ckpt_best)
+            self.log(f"[CKPT] saved best to {self.ckpt_best}", also_console=True)
+        else:
+            torch.save(ckpt, self.ckpt_last)
+            if periodic:
+                ckpt_periodic = self.output_dir / f"{self.cfg['model']['name']}_epoch_{self.current_epoch:04d}.pt"
+                torch.save(ckpt, ckpt_periodic)
+                self.log(f"[CKPT] saved periodic to {ckpt_periodic}", also_console=True)
+
+    def load_checkpoint(self, ckpt_path: str):
+        """체크포인트 로드."""
+        if not Path(ckpt_path).exists():
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+        ckpt = torch.load(ckpt_path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model"])
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+        self.current_epoch = ckpt["epoch"]
+        self.best_val_loss = ckpt.get("best_val_loss", float("inf"))
+        self.log(f"[CKPT] loaded from {ckpt_path} (epoch {self.current_epoch})", also_console=True)
+
+    def train(self, resume_from: Optional[str] = None):
+        """전체 학습 루프."""
+        # 로그 파일 초기화
+        with open(self.log_file, "w", encoding="utf-8") as f:
+            f.write("")
+
+        # Dashboard 서버 시작
+        if self.dashboard_server:
+            try:
+                self.dashboard_server.start()
+                self.log("Dashboard server started", True)
+            except Exception as e:
+                self.log(f"[WARNING] Failed to start dashboard server: {e}", also_console=True)
+
+        # Resume
+        if resume_from:
+            self.load_checkpoint(resume_from)
+            self.current_epoch += 1
+        else:
+            self.current_epoch = 0
+
+        epochs = self.cfg["training"]["epochs"]
+
+        self.log(f"Start training | epochs={epochs} lr={self.cfg['training']['lr']} "
+                f"batch_size={self.cfg['data']['batch_size']} use_amp={self.use_amp}", True)
+        self.log(f"Model: {self.cfg['model']['name']} | Loss: {self.cfg['loss']['name']}", True)
+
+        for epoch in range(self.current_epoch, epochs):
+            self.current_epoch = epoch
+
+            # Train
+            train_loss = self.train_one_epoch()
+            self.train_losses.append(train_loss)
+
+            # Validate
+            val_loss = self.validate()
+            self.val_losses.append(val_loss)
+
+            # Update best
+            is_best = val_loss < self.best_val_loss
+            if is_best:
+                self.best_val_loss = val_loss
+
+            # Save checkpoint
+            self.save_checkpoint(is_best=is_best, periodic=(epoch + 1) % self.save_every == 0)
+
+            # Log
+            lr_now = self.optimizer.param_groups[0]["lr"]
+            self.log(f"[EPOCH] {epoch+1}/{epochs} train_loss={train_loss:.6e} val_loss={val_loss:.6e} "
+                    f"best_val={self.best_val_loss:.6e} lr={lr_now:.2e}", True)
+
+            # Callbacks
+            for callback in self.callbacks:
+                try:
+                    callback(
+                        epoch=epoch,
+                        train_loss=train_loss,
+                        val_loss=val_loss,
+                        best_val_loss=self.best_val_loss,
+                        model=self.model,
+                        optimizer=self.optimizer,
+                        trainer=self
+                    )
+                except Exception as e:
+                    self.log(f"[CALLBACK ERROR] {e}", also_console=True)
+
+        self.log(f"Training complete! best_val_loss={self.best_val_loss:.6e}", True)
+
+        # Dashboard 서버 종료
+        if self.dashboard_server:
+            try:
+                self.dashboard_server.stop()
+                self.log("Dashboard server stopped", True)
+            except Exception as e:
+                self.log(f"[WARNING] Failed to stop dashboard server: {e}", also_console=True)

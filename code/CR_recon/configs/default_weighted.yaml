@@ -1,0 +1,55 @@
+# Test Config: MetaSpec_CNNXAttn + Weighted_Smooth Loss (5 epoch)
+# 용도: Loss 교체 (MSE+Pearson → Weighted_Smooth) 검증
+# 실행: python train.py --config configs/default_weighted.yaml
+
+seed: 42
+
+data:
+  struct_files:
+    - "../data_CR-main/binary_dataset_128_0.npy"
+    - "../data_CR-main/binary_dataset_128_1.npy"
+  spectra_files:
+    - "../data_CR-main/spectra_latest_0.npy"
+    - "../data_CR-main/spectra_latest_1.npy"
+  out_len: 30
+  map_to_pm1: true
+  augment_180: true
+  train_ratio: 0.95
+  batch_size: 64
+  num_workers: 0
+
+model:
+  name: "cnn_xattn"
+  params:
+    out_len: 30
+    d_model: 256
+    nhead: 8
+    dec_layers: 4
+    cnn_dropout: 0.05
+    tr_dropout: 0.1
+    head_dropout: 0.2
+    use_circular_padding: true
+
+loss:
+  name: "weighted_smooth"
+  params:
+    lambda1: 0.1
+    lambda2: 0.05
+    channel_weights: [1.0, 0.8, 0.8, 1.2]
+
+training:
+  epochs: 5
+  lr: 0.001
+  weight_decay: 0.005
+  grad_clip: 1.0
+  use_amp: true
+  warmup_ratio: 0.05
+  save_every: 1
+
+dashboard:
+  enabled: true
+  port: 8501
+
+output:
+  dir: "outputs/"
+  log_file: "train_log.txt"

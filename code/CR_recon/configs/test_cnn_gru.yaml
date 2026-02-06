@@ -1,0 +1,53 @@
+# Test Config: MetaSpec_CNNGRU + Weighted_Smooth Loss (5 epoch)
+# 용도: 모델과 loss 교체 동작 검증
+# 실행: python train.py --config configs/test_cnn_gru.yaml
+
+seed: 42
+
+data:
+  struct_files:
+    - "../data_CR-main/binary_dataset_128_0.npy"
+    - "../data_CR-main/binary_dataset_128_1.npy"
+  spectra_files:
+    - "../data_CR-main/spectra_latest_0.npy"
+    - "../data_CR-main/spectra_latest_1.npy"
+  out_len: 30
+  map_to_pm1: true
+  augment_180: true
+  train_ratio: 0.95
+  batch_size: 64
+  num_workers: 0
+
+model:
+  name: "cnn_gru"
+  params:
+    out_len: 30
+    d_model: 128
+    gru_layers: 2
+    cnn_dropout: 0.05
+    head_dropout: 0.1
+    use_circular_padding: true
+
+loss:
+  name: "weighted_smooth"
+  params:
+    lambda1: 0.1
+    lambda2: 0.05
+    channel_weights: [1.0, 0.8, 0.8, 1.2]
+
+training:
+  epochs: 5
+  lr: 0.001
+  weight_decay: 0.005
+  grad_clip: 1.0
+  use_amp: true
+  warmup_ratio: 0.05
+  save_every: 1
+
+dashboard:
+  enabled: true
+  port: 8501
+
+output:
+  dir: "outputs/"
+  log_file: "train_log.txt"

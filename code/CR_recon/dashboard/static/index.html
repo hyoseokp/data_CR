@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaSpec Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" onerror="window.chartJsLoadFailed=true;"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css" onerror="window.katexLoadFailed=true;">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js" onerror="window.katexLoadFailed=true;"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js" onerror="window.katexLoadFailed=true;"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        header h1 {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .header-info {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .status-connected {
+            background-color: #27ae60;
+            color: white;
+        }
+
+        .status-disconnected {
+            background-color: #e74c3c;
+            color: white;
+        }
+
+        .info-item {
+            font-size: 14px;
+            color: #ecf0f1;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #bdc3c7;
+        }
+
+        .progress-container {
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .progress-label {
+            font-size: 12px;
+            color: #ecf0f1;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background-color: #34495e;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 3px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #3498db;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+
+        .progress-fill.val {
+            background-color: #e74c3c;
+        }
+
+        .model-info-box {
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        .model-info-box.show {
+            display: block;
+        }
+
+        .model-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .model-info-section h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .model-info-content {
+            font-size: 12px;
+            overflow-x: auto;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            line-height: 1.6;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .panel {
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .panel h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+
+        .panel-chart {
+            position: relative;
+            height: 300px;
+        }
+
+        .panel-canvas {
+            position: relative;
+            height: 300px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        canvas.img-canvas {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            max-width: 100%;
+            max-height: 100%;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+
+        @media (max-width: 1200px) {
+            .dashboard-grid {
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            }
+            .model-info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .header-info {
+                width: 100%;
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔬 MetaSpec Dashboard</h1>
+        <div class="header-info">
+            <div class="status-badge" id="status-badge">Disconnected</div>
+            <div class="info-item">
+                <span class="info-label">Epoch:</span>
+                <span id="epoch-info">--/--</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">LR:</span>
+                <span id="lr-info">--</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Best Val:</span>
+                <span id="best-val-info">--</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Data:</span>
+                <span id="data-info">--</span>
+            </div>
+        </div>
+    </header>
+
+    <div style="background-color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
+        <!-- Epoch 진행 바 -->
+        <div class="progress-container">
+            <div class="progress-label">
+                <span id="epoch-progress-label">Epoch Progress</span>
+                <span id="epoch-progress-percent">0%</span>
+            </div>
+            <div class="progress-bar">
+                <div id="epoch-progress-fill" class="progress-fill"></div>
+            </div>
+        </div>
+
+        <!-- Batch 진행 바 -->
+        <div class="progress-container" style="margin-top: 10px;">
+            <div class="progress-label">
+                <span id="batch-progress-label">Batch Progress (Train)</span>
+                <span id="batch-progress-percent">0%</span>
+            </div>
+            <div class="progress-bar">
+                <div id="batch-progress-fill" class="progress-fill"></div>
+            </div>
+        </div>
+
+        <!-- 현재 손실값 -->
+        <div style="font-size: 12px; color: #7f8c8d; margin-top: 8px;">
+            <span id="current-loss-label">Current Loss: --</span>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- Panel 1: Loss 곡선 -->
+        <div class="panel">
+            <h3>Loss 곡선</h3>
+            <div class="panel-chart">
+                <canvas id="chart-loss"></canvas>
+            </div>
+        </div>
+
+        <!-- Panel 2: GT vs Prediction 스펙트럼 -->
+        <div class="panel">
+            <h3>GT vs Prediction (B,G,R)</h3>
+            <div class="panel-chart">
+                <canvas id="chart-spectrum"></canvas>
+            </div>
+        </div>
+
+        <!-- Panel 3: Input Structure -->
+        <div class="panel">
+            <h3>Input Structure (128×128)</h3>
+            <div class="panel-canvas">
+                <canvas id="canvas-input" width="600" height="600" class="img-canvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Panel 4: GT BGGR 2x2 mean -->
+        <div class="panel">
+            <h3>GT BGGR 2×2 (mean over λ)</h3>
+            <div class="panel-canvas">
+                <canvas id="canvas-gt-bggr" width="480" height="480" class="img-canvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Panel 5: Pred BGGR 2x2 mean -->
+        <div class="panel">
+            <h3>Pred BGGR 2×2 (mean over λ)</h3>
+            <div class="panel-canvas">
+                <canvas id="canvas-pred-bggr" width="480" height="480" class="img-canvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Panel 6: R/G/B Abs Error -->
+        <div class="panel">
+            <h3>Abs Error (B,G,R)</h3>
+            <div class="panel-chart">
+                <canvas id="chart-error"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div id="model-info-box" class="model-info-box">
+        <div class="model-info-grid">
+            <div class="model-info-section">
+                <h3>Model Architecture</h3>
+                <div id="model-latex" class="model-info-content"></div>
+            </div>
+            <div class="model-info-section">
+                <h3>Loss Function</h3>
+                <div id="loss-latex" class="model-info-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 대시보드 상태
+        const dashboard = {
+            connected: false,
+            reconnectAttempts: 0,
+            maxReconnectAttempts: Infinity,
+            reconnectDelay: 3000,
+            ws: null,
+            chartInstances: {},
+            modelInfoDisplayed: false,
+            currentData: {
+                epoch: 0,
+                total_epochs: 0,
+                lr: 0.0,
+                train_loss: 0.0,
+                val_loss: 0.0,
+                best_val: Infinity,
+                train_losses: [],
+                val_losses: [],
+                sample: null,
+                model_name: null,
+                model_params: null,
+                loss_name: null,
+                loss_params: null
+            }
+        };
+
+        // Chart.js 차트 인스턴스 초기화
+        function initCharts() {
+            // Chart.js가 로드되지 않으면 건너뛰기
+            if (typeof Chart === 'undefined') {
+                console.warn('Chart.js not loaded. Skipping chart initialization.');
+                return;
+            }
+
+            // Loss 곡선
+            dashboard.chartInstances.loss = new Chart(
+                document.getElementById('chart-loss'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            {
+                                label: 'Train Loss',
+                                data: [],
+                                borderColor: '#3498db',
+                                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                                tension: 0.4,
+                                pointRadius: 0
+                            },
+                            {
+                                label: 'Val Loss',
+                                data: [],
+                                borderColor: '#e74c3c',
+                                backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                                tension: 0.4,
+                                pointRadius: 0
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                type: 'logarithmic',
+                                title: {
+                                    display: true,
+                                    text: 'Loss (log scale)'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Epoch'
+                                }
+                            }
+                        }
+                    }
+                }
+            );
+
+            // GT vs Prediction 스펙트럼
+            dashboard.chartInstances.spectrum = new Chart(
+                document.getElementById('chart-spectrum'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            {
+                                label: 'B (GT)',
+                                data: [],
+                                borderColor: '#3498db',
+                                borderDash: [5, 5],
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: 'B (Pred)',
+                                data: [],
+                                borderColor: '#3498db',
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: 'G (GT)',
+                                data: [],
+                                borderColor: '#27ae60',
+                                borderDash: [5, 5],
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: 'G (Pred)',
+                                data: [],
+                                borderColor: '#27ae60',
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: 'R (GT)',
+                                data: [],
+                                borderColor: '#e74c3c',
+                                borderDash: [5, 5],
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: 'R (Pred)',
+                                data: [],
+                                borderColor: '#e74c3c',
+                                pointRadius: 0,
+                                tension: 0.4
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Wavelength (nm)'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Intensity'
+                                }
+                            }
+                        }
+                    }
+                }
+            );
+
+            // Abs Error 곡선
+            dashboard.chartInstances.error = new Chart(
+                document.getElementById('chart-error'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            {
+                                label: '|B error|',
+                                data: [],
+                                borderColor: '#3498db',
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: '|G error|',
+                                data: [],
+                                borderColor: '#27ae60',
+                                pointRadius: 0,
+                                tension: 0.4
+                            },
+                            {
+                                label: '|R error|',
+                                data: [],
+                                borderColor: '#e74c3c',
+                                pointRadius: 0,
+                                tension: 0.4
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Wavelength (nm)'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Abs Error'
+                                }
+                            }
+                        }
+                    }
+                }
+            );
+        }
+
+        // 로컬 스토리지에 데이터 저장
+        function saveDashboardState(data) {
+            try {
+                localStorage.setItem('dashboardState', JSON.stringify(data));
+            } catch (e) {
+                console.warn('Failed to save to localStorage:', e);
+            }
+        }
+
+        // 로컬 스토리지에서 데이터 복원
+        function loadDashboardState() {
+            try {
+                const saved = localStorage.getItem('dashboardState');
+                return saved ? JSON.parse(saved) : null;
+            } catch (e) {
+                console.warn('Failed to load from localStorage:', e);
+                return null;
+            }
+        }
+
+        // 진행 바 업데이트
+        function updateProgressBars(data) {
+            const progress = data.progress;
+            console.log('Progress data:', progress); // 디버깅
+
+            if (!progress) {
+                console.warn('No progress data');
+                return;
+            }
+
+            // Epoch 진행률
+            if (progress.total_epochs > 0) {
+                const epochPercent = Math.round(((progress.epoch + 1) / progress.total_epochs) * 100);
+                const epochFill = document.getElementById('epoch-progress-fill');
+                const epochPercent_el = document.getElementById('epoch-progress-percent');
+                const epochLabel_el = document.getElementById('epoch-progress-label');
+
+                if (!epochFill || !epochPercent_el || !epochLabel_el) {
+                    console.warn('Epoch progress bar elements not found');
+                } else {
+                    epochFill.style.width = epochPercent + '%';
+                    epochPercent_el.textContent = epochPercent + '%';
+                    epochLabel_el.textContent = `Epoch ${progress.epoch + 1}/${progress.total_epochs}`;
+                }
+            }
+
+            // Batch 진행률 및 Stage 표시
+            if (progress.total_batches > 0) {
+                const batchPercent = Math.round((progress.batch / progress.total_batches) * 100);
+                const batchFill = document.getElementById('batch-progress-fill');
+                const batchPercent_el = document.getElementById('batch-progress-percent');
+                const batchLabel_el = document.getElementById('batch-progress-label');
+
+                if (!batchFill || !batchPercent_el || !batchLabel_el) {
+                    console.warn('Batch progress bar elements not found');
+                } else {
+                    // Stage에 따라 색상 변경
+                    batchFill.className = 'progress-fill';
+                    if (progress.stage === 'val') {
+                        batchFill.classList.add('val');
+                    }
+
+                    batchFill.style.width = batchPercent + '%';
+                    batchPercent_el.textContent = batchPercent + '%';
+                    batchLabel_el.textContent =
+                        `${progress.stage.toUpperCase()} Batch ${progress.batch}/${progress.total_batches}`;
+                }
+            }
+
+            // 현재 손실값 표시
+            if (progress.current_loss !== undefined) {
+                const lossLabel_el = document.getElementById('current-loss-label');
+                if (lossLabel_el) {
+                    lossLabel_el.textContent = `Current Loss: ${progress.current_loss.toExponential(4)}`;
+                }
+            }
+        }
+
+        // 이미지를 canvas에 그리기 (업스케일링 포함)
+        function drawImage(canvasId, imgArray, size) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas || !imgArray) return;
+
+            const ctx = canvas.getContext('2d');
+
+            // 원본 이미지데이터 생성
+            const imageData = ctx.createImageData(size, size);
+            const data = imageData.data;
+
+            // 정규화: [min, max] → [0, 255]
+            const flat = imgArray.flat ? imgArray.flat() : imgArray;
+            const min = Math.min(...flat);
+            const max = Math.max(...flat);
+            const range = max - min || 1;
+
+            let idx = 0;
+            for (let i = 0; i < size * size; i++) {
+                const val = Math.floor(((flat[i] - min) / range) * 255);
+                data[idx + 0] = val;     // R
+                data[idx + 1] = val;     // G
+                data[idx + 2] = val;     // B
+                data[idx + 3] = 255;     // A
+                idx += 4;
+            }
+
+            // Canvas 크기에 맞춰서 그리기
+            const canvasWidth = canvas.width;
+            const canvasHeight = canvas.height;
+
+            // 원본 이미지데이터를 작은 캔버스에 먼저 그린 후 스케일
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = size;
+            tempCanvas.height = size;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.putImageData(imageData, 0, 0);
+
+            // 빠르게 그리기 위해 drawImage 사용 (자동 업스케일)
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            ctx.imageSmoothingEnabled = false;  // 픽셀 그대로 확대
+
+            // 박스 안에 맞춰서 중앙 정렬
+            const scale = Math.min(canvasWidth / size, canvasHeight / size);
+            const scaledWidth = size * scale;
+            const scaledHeight = size * scale;
+            const x = (canvasWidth - scaledWidth) / 2;
+            const y = (canvasHeight - scaledHeight) / 2;
+
+            ctx.drawImage(tempCanvas, x, y, scaledWidth, scaledHeight);
+        }
+
+        // 모델 정보 표시 함수
+        function displayModelInfo(modelName, modelParams, lossName, lossParams) {
+            const modelBox = document.getElementById('model-info-box');
+            const modelLatex = document.getElementById('model-latex');
+            const lossLatex = document.getElementById('loss-latex');
+
+            let modelHTML = '';
+            let lossHTML = '';
+
+            // Model 선택
+            if (modelName === 'cnn_xattn') {
+                modelHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <strong>MetaSpec_CNNXAttn</strong>
+                    </div>
+                    <div style="font-size: 13px; line-height: 1.8;">
+                        <div>Input: $x \\in \\mathbb{R}^{1 \\times 128 \\times 128}$</div>
+                        <div style="margin: 8px 0;">Architecture: CNN (5 stages) + Transformer Decoder</div>
+                        <div>Parameters:</div>
+                        <div style="margin-left: 15px; font-family: monospace;">
+                            d_model = ${modelParams.d_model}<br>
+                            nhead = ${modelParams.nhead}<br>
+                            dec_layers = ${modelParams.dec_layers}<br>
+                            cnn_dropout = ${modelParams.cnn_dropout}<br>
+                            tr_dropout = ${modelParams.tr_dropout}
+                        </div>
+                        <div style="margin-top: 8px;">Output: $y \\in \\mathbb{R}^{2 \\times 2 \\times ${modelParams.out_len}}$</div>
+                    </div>
+                `;
+            } else if (modelName === 'cnn_gru') {
+                modelHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <strong>MetaSpec_CNNGRU</strong>
+                    </div>
+                    <div style="font-size: 13px; line-height: 1.8;">
+                        <div>Input: $x \\in \\mathbb{R}^{1 \\times 128 \\times 128}$</div>
+                        <div style="margin: 8px 0;">Architecture: CNN Backbone + GRU Decoder</div>
+                        <div>Parameters:</div>
+                        <div style="margin-left: 15px; font-family: monospace;">
+                            d_model = ${modelParams.d_model}<br>
+                            gru_layers = ${modelParams.gru_layers}<br>
+                            cnn_dropout = ${modelParams.cnn_dropout}
+                        </div>
+                        <div style="margin-top: 8px;">Output: $y \\in \\mathbb{R}^{2 \\times 2 \\times ${modelParams.out_len}}$</div>
+                    </div>
+                `;
+            }
+
+            // Loss 선택
+            if (lossName === 'mse_pearson') {
+                const wMse = lossParams.w_mse || 1.0;
+                const wCorr = lossParams.w_corr || 0.2;
+                lossHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <strong>MSE + Pearson Correlation</strong>
+                    </div>
+                    <div style="font-size: 12px; line-height: 2;">
+                        $$L = ${wMse} \\cdot L_{\\text{MSE}} + ${wCorr} \\cdot L_{\\text{Corr}}$$
+                        $$L_{\\text{MSE}} = \\frac{1}{N} \\sum_i (\\hat{y}_i - y_i)^2$$
+                        $$L_{\\text{Corr}} = \\frac{1}{N} \\sum_i (1 - r_i)$$
+                        <div style="font-size: 11px; margin-top: 5px;">where $r_i = \\frac{\\text{Cov}(\\hat{y}_i, y_i)}{\\sigma(\\hat{y}_i) \\sigma(y_i)}$</div>
+                    </div>
+                `;
+            } else if (lossName === 'weighted_smooth') {
+                const lambda1 = lossParams.lambda1 || 0.1;
+                const lambda2 = lossParams.lambda2 || 0.05;
+                lossHTML = `
+                    <div style="margin-bottom: 10px;">
+                        <strong>Weighted MSE + Smoothness</strong>
+                    </div>
+                    <div style="font-size: 12px; line-height: 2;">
+                        $$L = L_{\\text{MSE}} + ${lambda1} \\cdot L_\\nabla + ${lambda2} \\cdot L_{\\nabla^2}$$
+                        $$L_{\\text{MSE}} = \\frac{1}{N} \\sum_i w_i(\\hat{y}_i - y_i)^2$$
+                        $$L_\\nabla = \\frac{1}{N} \\sum_i (\\nabla\\hat{y}_i - \\nabla y_i)^2$$
+                        $$L_{\\nabla^2} = \\frac{1}{N} \\sum_i (\\nabla^2\\hat{y}_i - \\nabla^2 y_i)^2$$
+                    </div>
+                `;
+            }
+
+            if (modelHTML && lossHTML) {
+                modelLatex.innerHTML = modelHTML;
+                lossLatex.innerHTML = lossHTML;
+                modelBox.classList.add('show');
+
+                // KaTeX 렌더링 (KaTeX가 로드되었을 때만)
+                if (typeof katex !== 'undefined') {
+                    try {
+                        renderMathInElement(modelLatex, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}] });
+                        renderMathInElement(lossLatex, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}] });
+                    } catch (e) {
+                        console.warn('KaTeX rendering failed:', e);
+                    }
+                }
+            }
+        }
+
+        // WebSocket 메시지 처리
+        function handleMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                dashboard.currentData = data;
+                console.log('WebSocket message received:', data); // 디버깅
+
+                // 로컬 스토리지에 저장 (새로고침 시 복원)
+                saveDashboardState(data);
+
+                // 헤더 정보 업데이트
+                document.getElementById('epoch-info').textContent =
+                    `${data.epoch + 1}/${data.total_epochs}`;
+                document.getElementById('lr-info').textContent =
+                    data.lr.toExponential(2);
+                document.getElementById('best-val-info').textContent =
+                    data.best_val !== Infinity ? data.best_val.toExponential(4) : '--';
+
+                // 데이터 통계 표시
+                if (data.data_stats) {
+                    const stats = data.data_stats;
+                    document.getElementById('data-info').textContent =
+                        `Train: ${stats.train_size.toLocaleString()} | Val: ${stats.val_size.toLocaleString()} | Total: ${stats.total_size.toLocaleString()}`;
+                }
+
+                // 진행 상황 업데이트 (매번 호출, progress가 있으면 업데이트)
+                console.log('Current progress state:', data.progress); // 디버깅
+                if (data.progress) {
+                    updateProgressBars(data);
+                }
+
+                // 모델 정보 표시 (첫 번째 메시지에서만)
+                if (!dashboard.modelInfoDisplayed && data.model_name && data.loss_name) {
+                    displayModelInfo(data.model_name, data.model_params, data.loss_name, data.loss_params);
+                    dashboard.modelInfoDisplayed = true;
+                }
+
+                // Loss 곡선 업데이트 (Chart.js 로드됨)
+                if (typeof Chart !== 'undefined' && dashboard.chartInstances.loss) {
+                    const lossChart = dashboard.chartInstances.loss;
+                    lossChart.data.labels = Array.from({length: data.train_losses.length}, (_, i) => i + 1);
+                    lossChart.data.datasets[0].data = data.train_losses;
+                    lossChart.data.datasets[1].data = data.val_losses;
+                    lossChart.update();
+                }
+
+                // Sample 데이터가 있으면 시각화
+                if (data.sample) {
+                    // Input Structure
+                    if (data.sample.input_struct) {
+                        const struct = data.sample.input_struct;
+                        if (Array.isArray(struct)) {
+                            drawImage('canvas-input', struct, 128);
+                        }
+                    }
+
+                    // GT / Pred BGGR
+                    if (data.sample.gt_bggr) {
+                        const gt = data.sample.gt_bggr;
+                        const gtMean = [[gt[0][0].reduce((a, b) => a + b, 0) / gt[0][0].length,
+                                         gt[0][1].reduce((a, b) => a + b, 0) / gt[0][1].length],
+                                        [gt[1][0].reduce((a, b) => a + b, 0) / gt[1][0].length,
+                                         gt[1][1].reduce((a, b) => a + b, 0) / gt[1][1].length]];
+                        drawImage('canvas-gt-bggr', gtMean, 2);
+                    }
+
+                    if (data.sample.pred_bggr) {
+                        const pred = data.sample.pred_bggr;
+                        const predMean = [[pred[0][0].reduce((a, b) => a + b, 0) / pred[0][0].length,
+                                          pred[0][1].reduce((a, b) => a + b, 0) / pred[0][1].length],
+                                         [pred[1][0].reduce((a, b) => a + b, 0) / pred[1][0].length,
+                                          pred[1][1].reduce((a, b) => a + b, 0) / pred[1][1].length]];
+                        drawImage('canvas-pred-bggr', predMean, 2);
+                    }
+
+                    // Spectrum 및 Error 곡선
+                    if (data.sample.gt_bggr && data.sample.pred_bggr && data.sample.waves) {
+                        const waves = data.sample.waves;
+                        const gtB = data.sample.gt_bggr[0][0];
+                        const gtG = data.sample.gt_bggr[0][1];
+                        const gtR = data.sample.gt_bggr[1][1];
+                        const predB = data.sample.pred_bggr[0][0];
+                        const predG = data.sample.pred_bggr[0][1];
+                        const predR = data.sample.pred_bggr[1][1];
+
+                        // Spectrum 차트 (Chart.js 로드됨)
+                        if (typeof Chart !== 'undefined' && dashboard.chartInstances.spectrum) {
+                            const specChart = dashboard.chartInstances.spectrum;
+                            specChart.data.labels = waves.map(w => w.toFixed(0));
+                            specChart.data.datasets[0].data = gtB;
+                            specChart.data.datasets[1].data = predB;
+                            specChart.data.datasets[2].data = gtG;
+                            specChart.data.datasets[3].data = predG;
+                            specChart.data.datasets[4].data = gtR;
+                            specChart.data.datasets[5].data = predR;
+                            specChart.update();
+                        }
+
+                        // Error 차트 (Chart.js 로드됨)
+                        if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
+                            const errB = gtB.map((v, i) => Math.abs(v - predB[i]));
+                            const errG = gtG.map((v, i) => Math.abs(v - predG[i]));
+                            const errR = gtR.map((v, i) => Math.abs(v - predR[i]));
+
+                            const errChart = dashboard.chartInstances.error;
+                            errChart.data.labels = waves.map(w => w.toFixed(0));
+                            errChart.data.datasets[0].data = errB;
+                            errChart.data.datasets[1].data = errG;
+                            errChart.data.datasets[2].data = errR;
+                            errChart.update();
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to parse message:', err);
+            }
+        }
+
+        // WebSocket 연결
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.hostname;
+            const port = window.location.port || (protocol === 'wss:' ? 443 : 80);
+            const url = `${protocol}//${host}:${port}/ws`;
+
+            console.log('Connecting to', url);
+
+            dashboard.ws = new WebSocket(url);
+
+            dashboard.ws.onopen = () => {
+                console.log('WebSocket connected');
+                dashboard.connected = true;
+                dashboard.reconnectAttempts = 0;
+                dashboard.reconnectDelay = 3000;
+                updateStatus();
+            };
+
+            dashboard.ws.onmessage = handleMessage;
+
+            dashboard.ws.onerror = (event) => {
+                console.error('WebSocket error:', event);
+            };
+
+            dashboard.ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                dashboard.connected = false;
+                updateStatus();
+                scheduleReconnect();
+            };
+        }
+
+        function scheduleReconnect() {
+            dashboard.reconnectAttempts++;
+            console.log(`Reconnecting in ${dashboard.reconnectDelay / 1000}s (attempt ${dashboard.reconnectAttempts})`);
+            setTimeout(connectWebSocket, dashboard.reconnectDelay);
+            dashboard.reconnectDelay = Math.min(dashboard.reconnectDelay * 2, 60000); // 최대 60초
+        }
+
+        function updateStatus() {
+            const badge = document.getElementById('status-badge');
+            if (dashboard.connected) {
+                badge.textContent = 'Connected';
+                badge.className = 'status-badge status-connected';
+            } else {
+                badge.textContent = 'Disconnected';
+                badge.className = 'status-badge status-disconnected';
+            }
+        }
+
+        // 초기화
+        window.addEventListener('load', () => {
+            // 저장된 상태 복원
+            const savedState = loadDashboardState();
+            if (savedState) {
+                // 복원된 데이터로 즉시 표시
+                handleMessage({ data: JSON.stringify(savedState) });
+            }
+
+            initCharts();
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>
