@@ -281,6 +281,44 @@ class Trainer:
         with open(self.log_file, "w", encoding="utf-8") as f:
             f.write("")
 
+        # 상세 설정 정보 기록
+        self.log("=" * 80, True)
+        self.log("TRAINING CONFIGURATION", True)
+        self.log("=" * 80, True)
+
+        # Model 정보
+        self.log(f"Model: {self.cfg['model']['name']}", True)
+        self.log(f"Model Path: models/{self.cfg['model']['name']}.py", True)
+        self.log(f"Model Parameters:", True)
+        for param_name, param_value in self.cfg['model']['params'].items():
+            self.log(f"  - {param_name}: {param_value}", False)
+
+        # Loss 정보
+        self.log(f"Loss Function: {self.cfg['loss']['name']}", True)
+        self.log(f"Loss Path: losses/{self.cfg['loss']['name']}.py", True)
+        self.log(f"Loss Parameters:", True)
+        for param_name, param_value in self.cfg['loss']['params'].items():
+            self.log(f"  - {param_name}: {param_value}", False)
+
+        # Hyperparameters
+        self.log(f"Hyperparameters:", True)
+        self.log(f"  - Learning Rate: {self.cfg['training']['lr']}", False)
+        self.log(f"  - Weight Decay: {self.cfg['training']['weight_decay']}", False)
+        self.log(f"  - Epochs: {self.cfg['training']['epochs']}", False)
+        self.log(f"  - Batch Size: {self.cfg['data']['batch_size']}", False)
+        self.log(f"  - Gradient Clip: {self.cfg['training']['grad_clip']}", False)
+        self.log(f"  - Warmup Ratio: {self.cfg['training']['warmup_ratio']}", False)
+        self.log(f"  - Use AMP: {self.use_amp}", False)
+        self.log(f"  - Augment 180: {self.cfg['data'].get('augment_180', False)}", False)
+
+        # Data 정보
+        self.log(f"Data Statistics:", True)
+        self.log(f"  - Train Size: {self.data_stats['train_size']}", False)
+        self.log(f"  - Val Size: {self.data_stats['val_size']}", False)
+        self.log(f"  - Total Size: {self.data_stats['total_size']}", False)
+        self.log("=" * 80, True)
+        self.log("", True)
+
         # Dashboard 서버 시작
         if self.dashboard_server:
             try:
