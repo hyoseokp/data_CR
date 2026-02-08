@@ -31,12 +31,13 @@ loss:
   params:
     w_mse: 0.5
     w_corr: 0.5
+    blue_weight: 2.0
 
 training:
-  epochs: 300
-  lr: 0.003
+  epochs: 500
+  lr: 0.001
   weight_decay: 0.005
-  grad_clip: 1.0
+  grad_clip: 0.5
   use_amp: true
   warmup_ratio: 0.05
   save_every: 10

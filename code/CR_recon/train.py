@@ -1,14 +1,173 @@
 """
 CLI 진입점: python train.py --config configs/default.yaml
-자동 데이터 정제 기능 포함 (정제된 데이터 없으면 자동 생성)
+자동 데이터 업데이트 및 정제 기능 포함
+- GitHub(hyoseokp/data_CR)에서 최신 데이터 자동 다운로드 (zip 방식)
+- 정제된 데이터 없으면 자동 생성
 """
 import argparse
+import hashlib
+import os
+import shutil
 import sys
 import subprocess
+import tempfile
+import time
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from utils import load_config
 from trainer import Trainer
+
+GITHUB_ZIP_URL = "https://github.com/hyoseokp/data_CR/archive/refs/heads/main.zip"
+UPDATE_INTERVAL_SEC = 86400  # 1일
+
+
+def _md5(filepath):
+    """파일의 MD5 해시를 계산한다."""
+    h = hashlib.md5()
+    with open(filepath, "rb") as f:
+        while True:
+            chunk = f.read(1 << 20)  # 1MB
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _download_progress(block_num, block_size, total_size):
+    """urllib.request.urlretrieve 진행률 콜백."""
+    downloaded = block_num * block_size
+    if total_size > 0:
+        pct = min(downloaded / total_size * 100, 100)
+        mb_done = downloaded / (1 << 20)
+        mb_total = total_size / (1 << 20)
+        print(f"\r[DOWNLOAD] {mb_done:.1f} / {mb_total:.1f} MB ({pct:.0f}%)", end="", flush=True)
+    else:
+        mb_done = downloaded / (1 << 20)
+        print(f"\r[DOWNLOAD] {mb_done:.1f} MB", end="", flush=True)
+
+
+def ensure_latest_data(data_dir):
+    """
+    GitHub(hyoseokp/data_CR)에서 최신 데이터를 zip으로 다운로드.
+    - .last_update 타임스탬프를 확인하여 1일 미만이면 스킵
+    - spectra_latest 파일 변경 시 dataset/bayer/ 삭제 → 재전처리 유도
+    - binary_dataset 파일은 로컬에 없을 때만 복사
+    - 다운로드 실패 시 경고만 출력하고 기존 데이터로 진행
+    """
+    data_dir = Path(data_dir)
+    last_update_file = data_dir / ".last_update"
+
+    # 1) 최신 여부 확인
+    if last_update_file.exists():
+        try:
+            last_ts = float(last_update_file.read_text().strip())
+            elapsed = time.time() - last_ts
+            if elapsed < UPDATE_INTERVAL_SEC:
+                hours = elapsed / 3600
+                print(f"[INFO] 데이터 최신 상태 (마지막 업데이트: {hours:.1f}시간 전)")
+                return
+        except (ValueError, OSError):
+            pass  # 파일 손상 → 업데이트 진행
+
+    print("[INFO] GitHub에서 최신 데이터를 확인합니다...")
+
+    # spectra 파일의 기존 해시 기록 (변경 감지용)
+    spectra_files = ["spectra_latest_0.npy", "spectra_latest_1.npy"]
+    old_hashes = {}
+    for name in spectra_files:
+        path = data_dir / name
+        if path.exists():
+            old_hashes[name] = _md5(path)
+
+    tmp_zip = None
+    tmp_dir = None
+    try:
+        # 2) zip 다운로드
+        print(f"[INFO] 다운로드 중: {GITHUB_ZIP_URL}")
+        tmp_zip = tempfile.mktemp(suffix=".zip")
+        urllib.request.urlretrieve(GITHUB_ZIP_URL, tmp_zip, reporthook=_download_progress)
+        print()  # 진행률 줄바꿈
+
+        # 3) 압축 해제
+        tmp_dir = tempfile.mkdtemp()
+        print("[INFO] 압축 해제 중...")
+        with zipfile.ZipFile(tmp_zip, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        # zip 내부 구조: data_CR-main/ 디렉토리
+        extracted_root = Path(tmp_dir) / "data_CR-main"
+        if not extracted_root.is_dir():
+            # 혹시 이름이 다를 경우 첫 번째 디렉토리 사용
+            subdirs = [d for d in Path(tmp_dir).iterdir() if d.is_dir()]
+            if subdirs:
+                extracted_root = subdirs[0]
+            else:
+                print("[WARN] zip 내부 구조를 인식할 수 없습니다. 업데이트를 건너뜁니다.")
+                return
+
+        # 4) 파일 복사
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        # binary_dataset 파일: 로컬에 없을 때만 복사 (대용량)
+        binary_files = ["binary_dataset_128_0.npy", "binary_dataset_128_1.npy"]
+        for name in binary_files:
+            src = extracted_root / name
+            dst = data_dir / name
+            if src.exists() and not dst.exists():
+                print(f"[INFO] 복사 중: {name} ({src.stat().st_size / (1 << 30):.1f} GB)")
+                shutil.copy2(str(src), str(dst))
+
+        # spectra 및 기타 파일: 항상 복사 (덮어쓰기)
+        for item in extracted_root.iterdir():
+            if item.name in binary_files:
+                continue  # 위에서 처리
+            dst = data_dir / item.name
+            if item.is_file():
+                shutil.copy2(str(item), str(dst))
+            elif item.is_dir():
+                if dst.exists():
+                    shutil.rmtree(str(dst))
+                shutil.copytree(str(item), str(dst))
+
+        # 5) .last_update 기록
+        last_update_file.write_text(str(time.time()))
+        print("[OK] 데이터 업데이트 완료!")
+
+        # 6) spectra 변경 감지 → dataset/bayer/ 삭제
+        spectra_changed = False
+        for name in spectra_files:
+            path = data_dir / name
+            if path.exists():
+                new_hash = _md5(path)
+                old_hash = old_hashes.get(name)
+                if old_hash is None or old_hash != new_hash:
+                    spectra_changed = True
+                    break
+            elif name in old_hashes:
+                # 이전에 있었는데 새 zip에 없다면 변경으로 간주
+                spectra_changed = True
+                break
+
+        if spectra_changed:
+            bayer_dir = data_dir.parent / "code" / "CR_recon" / "dataset" / "bayer"
+            if bayer_dir.exists():
+                print("[INFO] spectra 데이터가 변경되었습니다. 전처리 데이터를 삭제합니다.")
+                shutil.rmtree(str(bayer_dir))
+
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+        print(f"\n[WARN] 데이터 다운로드 실패: {e}")
+        print("[WARN] 기존 데이터로 진행합니다.")
+    except zipfile.BadZipFile:
+        print("\n[WARN] 다운로드된 zip 파일이 손상되었습니다.")
+        print("[WARN] 기존 데이터로 진행합니다.")
+    finally:
+        # 임시 파일 정리
+        if tmp_zip and os.path.exists(tmp_zip):
+            os.remove(tmp_zip)
+        if tmp_dir and os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def ensure_preprocessed_data(cfg_dir):
@@ -87,6 +246,12 @@ def main():
         default=None,
         help="Path to checkpoint file to resume from"
     )
+    parser.add_argument(
+        "--init-weights",
+        type=str,
+        default=None,
+        help="Path to checkpoint to load model weights only (train from epoch 0)"
+    )
 
     args = parser.parse_args()
 
@@ -101,10 +266,27 @@ def main():
     cfg_file_path = Path(args.config).resolve()
     cfg_dir = cfg_file_path.parent.parent  # configs/default.yaml → CR_recon/
 
+    # GitHub에서 최신 데이터 다운로드
+    data_dir = cfg_dir.parent / "data_CR-main"
+    ensure_latest_data(data_dir)
+
     # 정제된 데이터 확인 및 자동 생성
     if not ensure_preprocessed_data(cfg_dir):
         print("\n[ERROR] 데이터 정제에 실패했습니다. 학습을 시작할 수 없습니다.")
         sys.exit(1)
+
+    # Best checkpoint 확인 및 사용자 선택
+    init_weights = args.init_weights
+    if not args.resume and not args.init_weights:
+        best_ckpt = Path(cfg_dir) / "outputs" / f"{cfg['model']['name']}_best.pt"
+        if best_ckpt.exists():
+            print(f"\n[INFO] 기존 best checkpoint 발견: {best_ckpt}")
+            choice = input("[선택] 기존 best 파라미터를 불러올까요? (y/n): ").strip().lower()
+            if choice == 'y':
+                init_weights = str(best_ckpt)
+                print(f"[INFO] best 파라미터를 불러와서 학습합니다.")
+            else:
+                print("[INFO] 처음부터 새로 학습합니다.")
 
     print("\n" + "=" * 80)
     print("학습 시작")
@@ -123,14 +305,14 @@ def main():
 
     port = cfg.get("dashboard", {}).get("port", 8501)
     print("\n" + "=" * 80)
-    print("🎯 Dashboard URLs")
+    print("Dashboard URLs")
     print("=" * 80)
-    print(f"📱 Local:     http://localhost:{port}")
-    print(f"🌐 Network:   http://{local_ip}:{port}")
+    print(f"  Local:     http://localhost:{port}")
+    print(f"  Network:   http://{local_ip}:{port}")
     print("=" * 80 + "\n")
 
     # 학습 실행
-    trainer.train(resume_from=args.resume)
+    trainer.train(resume_from=args.resume, init_weights=init_weights)
 
 
 if __name__ == "__main__":

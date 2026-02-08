@@ -4,6 +4,7 @@ config 기반으로 모델/loss/데이터를 조립하여 학습을 실행한다
 """
 import os
 import math
+import re
 import time
 from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any
@@ -71,15 +72,17 @@ class Trainer:
             eps=1e-8
         )
 
-        # Scheduler: cosine annealing with linear warmup
-        total_steps = cfg["training"]["epochs"] * len(self.train_loader)
-        warmup_steps = int(cfg["training"]["warmup_ratio"] * total_steps)
+        # Scheduler: cosine annealing with linear warmup (epoch 단위)
+        total_epochs = cfg["training"]["epochs"]
+        warmup_epochs = max(1, int(cfg["training"]["warmup_ratio"] * total_epochs))
+        min_lr_ratio = cfg["training"].get("min_lr_ratio", 0.01)  # base lr의 1%
 
-        def lr_lambda(step: int):
-            if step < warmup_steps:
-                return float(step + 1) / float(max(1, warmup_steps))
-            t = (step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            return 0.5 * (1.0 + math.cos(math.pi * t))
+        def lr_lambda(epoch: int):
+            if epoch < warmup_epochs:
+                return float(epoch + 1) / float(warmup_epochs)
+            t = (epoch - warmup_epochs) / float(max(1, total_epochs - warmup_epochs))
+            cosine = 0.5 * (1.0 + math.cos(math.pi * t))
+            return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
         self.scheduler = LambdaLR(self.optimizer, lr_lambda=lr_lambda)
 
@@ -182,8 +185,6 @@ class Trainer:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
                 self.optimizer.step()
 
-            self.scheduler.step()
-
             total_loss += float(loss.item())
             lr_now = self.optimizer.param_groups[0]["lr"]
             pbar.set_postfix({
@@ -253,6 +254,8 @@ class Trainer:
             "epoch": self.current_epoch,
             "val_loss": self.val_losses[-1] if self.val_losses else float("inf"),
             "best_val_loss": self.best_val_loss,
+            "train_losses": self.train_losses,
+            "val_losses": self.val_losses,
         }
 
         if is_best:
@@ -275,19 +278,65 @@ class Trainer:
         self.optimizer.load_state_dict(ckpt["optimizer"])
         self.current_epoch = ckpt["epoch"]
         self.best_val_loss = ckpt.get("best_val_loss", float("inf"))
+        self.train_losses = ckpt.get("train_losses", [])
+        self.val_losses = ckpt.get("val_losses", [])
         self.log(f"[CKPT] loaded from {ckpt_path} (epoch {self.current_epoch})", also_console=True)
 
-    def train(self, resume_from: Optional[str] = None):
+    def load_weights(self, ckpt_path: str):
+        """모델 가중치만 로드 (optimizer/epoch 초기화 안 함)."""
+        if not Path(ckpt_path).exists():
+            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+        ckpt = torch.load(ckpt_path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model"])
+        self.log(f"[WEIGHTS] loaded model weights from {ckpt_path}", also_console=True)
+
+    def _parse_log_losses(self):
+        """로그 파일에서 이전 train/val loss 히스토리를 복원."""
+        train_losses, val_losses = [], []
+        pattern = re.compile(r'train_loss=([\d.e+-]+)\s+val_loss=([\d.e+-]+)')
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    train_losses.append(float(m.group(1)))
+                    val_losses.append(float(m.group(2)))
+        return train_losses, val_losses
+
+    def train(self, resume_from: Optional[str] = None, init_weights: Optional[str] = None):
         """전체 학습 루프."""
-        # 로그 파일 초기화
-        with open(self.log_file, "w", encoding="utf-8") as f:
-            f.write("")
-            f.flush()
-            os.fsync(f.fileno())
+        is_resume = resume_from is not None
+
+        # 모델 가중치만 로드 (epoch 0부터 새로 학습)
+        if init_weights:
+            self.load_weights(init_weights)
+
+        # Resume: checkpoint 로드 (로그 파일보다 선행)
+        if is_resume:
+            self.load_checkpoint(resume_from)
+            self.current_epoch += 1
+            # Checkpoint에 loss 히스토리가 없으면 로그에서 복원
+            if not self.train_losses and self.log_file.exists():
+                self.train_losses, self.val_losses = self._parse_log_losses()
+            # Scheduler를 현재 epoch까지 fast-forward
+            for _ in range(self.current_epoch):
+                self.scheduler.step()
+        else:
+            self.current_epoch = 0
+
+        # 로그 파일: 새로 시작시 초기화, resume시 유지
+        if not is_resume:
+            with open(self.log_file, "w", encoding="utf-8") as f:
+                f.write("")
+                f.flush()
+                os.fsync(f.fileno())
 
         # 상세 설정 정보 기록
         self.log("=" * 80, True)
-        self.log("TRAINING CONFIGURATION", True)
+        if is_resume:
+            self.log(f"TRAINING RESUMED FROM EPOCH {self.current_epoch}", True)
+        else:
+            self.log("TRAINING CONFIGURATION", True)
         self.log("=" * 80, True)
 
         # Model 정보
@@ -323,26 +372,31 @@ class Trainer:
         self.log("=" * 80, True)
         self.log("", True)
 
-        # Dashboard 서버 시작 및 상태 초기화
+        # Dashboard 서버 시작
         if self.dashboard_server:
             try:
                 self.dashboard_server.start()
-                # 새 훈련 시작 시 이전 상태 초기화
-                self.dashboard_server.reset_state()
+                if not is_resume:
+                    self.dashboard_server.reset_state()
+                else:
+                    # Resume 시 이전 loss 히스토리를 대시보드에 즉시 반영
+                    self.dashboard_server.state["train_losses"] = [float(x) for x in self.train_losses]
+                    self.dashboard_server.state["val_losses"] = [float(x) for x in self.val_losses]
+                    self.dashboard_server.state["epoch"] = self.current_epoch - 1
+                    self.dashboard_server.state["total_epochs"] = self.cfg["training"]["epochs"]
+                    self.dashboard_server.state["best_val"] = float(self.best_val_loss)
+                    if self.train_losses:
+                        self.dashboard_server.state["train_loss"] = float(self.train_losses[-1])
+                    if self.val_losses:
+                        self.dashboard_server.state["val_loss"] = float(self.val_losses[-1])
                 self.log("Dashboard server started", True)
             except Exception as e:
                 self.log(f"[WARNING] Failed to start dashboard server: {e}", also_console=True)
 
-        # Resume
-        if resume_from:
-            self.load_checkpoint(resume_from)
-            self.current_epoch += 1
-        else:
-            self.current_epoch = 0
-
         epochs = self.cfg["training"]["epochs"]
 
-        self.log(f"Start training | epochs={epochs} lr={self.cfg['training']['lr']} "
+        lr_now = self.optimizer.param_groups[0]["lr"]
+        self.log(f"Start training | epochs={epochs} lr={lr_now:.2e} "
                 f"batch_size={self.cfg['data']['batch_size']} use_amp={self.use_amp}", True)
         self.log(f"Model: {self.cfg['model']['name']} | Loss: {self.cfg['loss']['name']}", True)
 
@@ -369,6 +423,15 @@ class Trainer:
             lr_now = self.optimizer.param_groups[0]["lr"]
             self.log(f"[EPOCH] {epoch+1}/{epochs} train_loss={train_loss:.6e} val_loss={val_loss:.6e} "
                     f"best_val={self.best_val_loss:.6e} lr={lr_now:.2e}", True)
+
+            # Scheduler step (epoch-based, not batch-based)
+            self.scheduler.step()
+
+            # Loss spike detection
+            if train_loss > 1.0:
+                self.log(f"[WARNING] High train loss detected: {train_loss:.6e}", also_console=True)
+            if val_loss > 1.0:
+                self.log(f"[WARNING] High val loss detected: {val_loss:.6e}", also_console=True)
 
             # Callbacks
             for callback in self.callbacks:
