@@ -67,9 +67,9 @@ class Trainer:
         constraints_cfg = cfg.get("constraints", {}) if isinstance(cfg, dict) else {}
         self.constraint_sum_min = float(constraints_cfg.get("sum_min", 0.45))
         self.constraint_sum_max = float(constraints_cfg.get("sum_max", 0.95))
-        # Dataset currently returns targets in negative physical convention (bggr = -bggr),
-        # so enforce constraint in physical domain by default.
-        self.constraint_physical_is_negative = bool(constraints_cfg.get("physical_is_negative", True))
+        # Enforce constraint in the same domain as the model output/target by default.
+        # If your "physical intensity" is represented as `-pred`, set physical_is_negative=True in config.
+        self.constraint_physical_is_negative = bool(constraints_cfg.get("physical_is_negative", False))
 
         # Optimizer
         lr = cfg["training"]["lr"]

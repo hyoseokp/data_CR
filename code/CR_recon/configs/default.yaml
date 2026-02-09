@@ -48,6 +48,11 @@ dashboard:
   enabled: true
   port: 8501
 
+constraints:
+  sum_min: 0.45
+  sum_max: 0.95
+  physical_is_negative: false
+
 output:
   dir: "outputs/"
   log_file: "train_log.txt"
