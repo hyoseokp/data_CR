@@ -229,6 +229,46 @@
             padding: 3px 8px;
             border-radius: 4px;
         }
+        .chart-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .segmented {
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            background: var(--bg);
+        }
+        .seg-btn {
+            appearance: none;
+            border: 0;
+            background: transparent;
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            cursor: pointer;
+            line-height: 1;
+            border-right: 1px solid var(--border);
+            user-select: none;
+        }
+        .seg-btn:last-child { border-right: 0; }
+        .seg-btn.active {
+            background: #0f172a;
+            color: #ffffff;
+        }
+        .seg-btn:focus { outline: none; }
+        .seg-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-right: 6px;
+            white-space: nowrap;
+        }
         .loss-chart-container {
             position: relative;
             height: 380px;
@@ -441,7 +481,23 @@
     <div class="loss-section">
         <div class="section-header">
             <div class="section-title">Training Progress</div>
-            <div class="section-badge">Log Scale</div>
+            <div class="chart-controls">
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span class="seg-label">Y</span>
+                    <div class="segmented" id="loss-scale-toggle">
+                        <button class="seg-btn" type="button" data-scale="log">Log</button>
+                        <button class="seg-btn" type="button" data-scale="linear">Linear</button>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span class="seg-label">Window</span>
+                    <div class="segmented" id="loss-window-toggle">
+                        <button class="seg-btn" type="button" data-window="all">All</button>
+                        <button class="seg-btn" type="button" data-window="10">Recent 10</button>
+                        <button class="seg-btn" type="button" data-window="50">Recent 50</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="loss-chart-container">
             <canvas id="chart-loss"></canvas>
@@ -522,6 +578,10 @@
             ws: null,
             chartInstances: {},
             modelInfoDisplayed: false,
+            lastModelName: null,
+            lastLossName: null,
+            lossScale: 'log',      // 'log' | 'linear'
+            lossWindow: 'all',     // 'all' | 10 | 50
             currentData: {
                 epoch: 0, total_epochs: 0, lr: 0.0,
                 train_loss: 0.0, val_loss: 0.0, best_val: Infinity,
@@ -531,6 +591,74 @@
                 loss_name: null, loss_params: null
             }
         };
+
+        const UI_STATE_KEY = 'dashboardUI';
+
+        function saveUIState() {
+            try {
+                localStorage.setItem(UI_STATE_KEY, JSON.stringify({
+                    lossScale: dashboard.lossScale,
+                    lossWindow: dashboard.lossWindow
+                }));
+            } catch (e) { /* ignore */ }
+        }
+
+        function loadUIState() {
+            try {
+                const s = localStorage.getItem(UI_STATE_KEY);
+                if (!s) return;
+                const ui = JSON.parse(s);
+                if (ui && (ui.lossScale === 'log' || ui.lossScale === 'linear')) dashboard.lossScale = ui.lossScale;
+                if (ui && (ui.lossWindow === 'all' || ui.lossWindow === 10 || ui.lossWindow === 50 || ui.lossWindow === '10' || ui.lossWindow === '50')) {
+                    dashboard.lossWindow = (ui.lossWindow === '10' ? 10 : (ui.lossWindow === '50' ? 50 : ui.lossWindow));
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function setActiveButtons(container, attr, value) {
+            if (!container) return;
+            const btns = container.querySelectorAll('.seg-btn');
+            btns.forEach(b => {
+                const v = b.getAttribute(attr);
+                b.classList.toggle('active', String(v) === String(value));
+            });
+        }
+
+        function applyLossScale(scale) {
+            dashboard.lossScale = (scale === 'linear') ? 'linear' : 'log';
+            setActiveButtons(document.getElementById('loss-scale-toggle'), 'data-scale', dashboard.lossScale);
+            updateLossChart(dashboard.currentData);
+            saveUIState();
+        }
+
+        function applyLossWindow(windowVal) {
+            const w = (windowVal === '10' || windowVal === 10) ? 10 : (windowVal === '50' || windowVal === 50) ? 50 : 'all';
+            dashboard.lossWindow = w;
+            setActiveButtons(document.getElementById('loss-window-toggle'), 'data-window', dashboard.lossWindow);
+            updateLossChart(dashboard.currentData);
+            saveUIState();
+        }
+
+        function initLossControls() {
+            const scaleBox = document.getElementById('loss-scale-toggle');
+            const winBox = document.getElementById('loss-window-toggle');
+            if (scaleBox) {
+                scaleBox.addEventListener('click', (e) => {
+                    const btn = e.target.closest('button[data-scale]');
+                    if (!btn) return;
+                    applyLossScale(btn.getAttribute('data-scale'));
+                });
+            }
+            if (winBox) {
+                winBox.addEventListener('click', (e) => {
+                    const btn = e.target.closest('button[data-window]');
+                    if (!btn) return;
+                    applyLossWindow(btn.getAttribute('data-window'));
+                });
+            }
+            setActiveButtons(scaleBox, 'data-scale', dashboard.lossScale);
+            setActiveButtons(winBox, 'data-window', dashboard.lossWindow);
+        }
 
         /* ===== CHART INIT ===== */
         function initCharts() {
@@ -583,10 +711,10 @@
                         },
                         scales: {
                             y: {
-                                type: 'logarithmic',
+                                type: dashboard.lossScale === 'linear' ? 'linear' : 'logarithmic',
                                 grid: { color: gridColor },
                                 ticks: { color: tickColor, font: { size: 11 } },
-                                title: { display: true, text: 'Loss (log)', color: tickColor, font: { size: 12 } }
+                                title: { display: true, text: dashboard.lossScale === 'linear' ? 'Loss' : 'Loss (log)', color: tickColor, font: { size: 12 } }
                             },
                             x: {
                                 grid: { color: gridColor, display: false },
@@ -677,6 +805,36 @@
                 const s = localStorage.getItem('dashboardState');
                 return s ? JSON.parse(s) : null;
             } catch (e) { return null; }
+        }
+
+        function updateLossChart(data) {
+            if (typeof Chart === 'undefined' || !dashboard.chartInstances.loss) return;
+            const c = dashboard.chartInstances.loss;
+            const tr = (data && data.train_losses) ? data.train_losses : [];
+            const va = (data && data.val_losses) ? data.val_losses : [];
+            const n = tr.length;
+            const w = dashboard.lossWindow;
+            const windowSize = (w === 10 || w === 50) ? w : null;
+            const start = windowSize ? Math.max(0, n - windowSize) : 0;
+
+            const labels = [];
+            for (let i = start; i < n; i++) labels.push(i + 1);
+
+            const trSlice = tr.slice(start);
+            const vaSlice = va.slice(start);
+            if (dashboard.lossScale !== 'linear') {
+                const eps = 1e-12;
+                for (let i = 0; i < trSlice.length; i++) trSlice[i] = Math.max(eps, trSlice[i]);
+                for (let i = 0; i < vaSlice.length; i++) vaSlice[i] = Math.max(eps, vaSlice[i]);
+            }
+
+            c.data.labels = labels;
+            c.data.datasets[0].data = trSlice;
+            c.data.datasets[1].data = vaSlice;
+
+            c.options.scales.y.type = dashboard.lossScale === 'linear' ? 'linear' : 'logarithmic';
+            c.options.scales.y.title.text = dashboard.lossScale === 'linear' ? 'Loss' : 'Loss (log)';
+            c.update();
         }
 
         /* ===== FORMAT HELPERS ===== */
@@ -940,13 +1098,7 @@
                 }
 
                 // Loss chart
-                if (typeof Chart !== 'undefined' && dashboard.chartInstances.loss) {
-                    const c = dashboard.chartInstances.loss;
-                    c.data.labels = Array.from({length: data.train_losses.length}, (_, i) => i + 1);
-                    c.data.datasets[0].data = data.train_losses;
-                    c.data.datasets[1].data = data.val_losses;
-                    c.update();
-                }
+                updateLossChart(data);
 
                 // Sample visualizations
                 if (data.sample) {
@@ -1043,9 +1195,11 @@
 
         /* ===== INIT ===== */
         window.addEventListener('load', () => {
+            loadUIState();
+            initLossControls();
+            initCharts();
             const saved = loadDashboardState();
             if (saved) handleMessage({ data: JSON.stringify(saved) });
-            initCharts();
             connectWebSocket();
         });
     </script>
