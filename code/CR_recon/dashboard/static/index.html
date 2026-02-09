@@ -605,12 +605,12 @@
                     data: {
                         labels: [],
                         datasets: [
-                            { label: 'GT', data: [], borderColor: '#ef4444', borderDash: [6, 3], borderWidth: 2, pointRadius: 0, tension: 0.4 },
-                            { label: 'Pred', data: [], borderColor: '#ef4444', borderWidth: 2, pointRadius: 0, tension: 0.4 },
-                            { label: 'GT', data: [], borderColor: '#22c55e', borderDash: [6, 3], borderWidth: 2, pointRadius: 0, tension: 0.4 },
-                            { label: 'Pred', data: [], borderColor: '#22c55e', borderWidth: 2, pointRadius: 0, tension: 0.4 },
-                            { label: 'GT', data: [], borderColor: '#3b82f6', borderDash: [6, 3], borderWidth: 2, pointRadius: 0, tension: 0.4 },
-                            { label: 'Pred', data: [], borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0, tension: 0.4 }
+                            { label: 'R GT', data: [], borderColor: 'rgba(239,68,68,0.35)', borderWidth: 2, pointRadius: 0, tension: 0.4 },
+                            { label: 'R Pred', data: [], borderColor: '#ef4444', borderWidth: 2, pointRadius: 0, tension: 0.4 },
+                            { label: 'G GT', data: [], borderColor: 'rgba(34,197,94,0.35)', borderWidth: 2, pointRadius: 0, tension: 0.4 },
+                            { label: 'G Pred', data: [], borderColor: '#22c55e', borderWidth: 2, pointRadius: 0, tension: 0.4 },
+                            { label: 'B GT', data: [], borderColor: 'rgba(59,130,246,0.35)', borderWidth: 2, pointRadius: 0, tension: 0.4 },
+                            { label: 'B Pred', data: [], borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0, tension: 0.4 }
                         ]
                     },
                     options: {
@@ -619,29 +619,10 @@
                         plugins: {
                             legend: { display: true, position: 'top',
                                 labels: {
-                                    usePointStyle: false,
-                                    boxWidth: 30,
-                                    boxHeight: 0,
+                                    usePointStyle: true,
+                                    pointStyle: 'line',
                                     font: { size: 11, family: fontFamily },
-                                    generateLabels: function(chart) {
-                                        const uniqueLabels = [];
-                                        const seenLabels = new Set();
-                                        chart.data.datasets.forEach(function(ds, i) {
-                                            if (!seenLabels.has(ds.label)) {
-                                                seenLabels.add(ds.label);
-                                                uniqueLabels.push({
-                                                    text: ds.label === 'GT' ? '- - - : Ground Truth' : '_____ : Prediction',
-                                                    strokeStyle: ds.borderColor,
-                                                    fillStyle: 'transparent',
-                                                    lineDash: ds.borderDash || [],
-                                                    lineWidth: ds.borderWidth || 2,
-                                                    hidden: !chart.isDatasetVisible(i),
-                                                    datasetIndex: i
-                                                });
-                                            }
-                                        });
-                                        return uniqueLabels;
-                                    }
+                                    boxWidth: 20
                                 }
                             }
                         },
