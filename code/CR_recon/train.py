@@ -6,6 +6,7 @@ CLI 진입점: python train.py --config configs/default.yaml
 """
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -48,16 +49,23 @@ def _download_progress(block_num, block_size, total_size):
         print(f"\r[DOWNLOAD] {mb_done:.1f} MB", end="", flush=True)
 
 
-def ensure_latest_data(data_dir):
+def ensure_latest_data(data_dir, cfg_dir=None):
     """
     GitHub(hyoseokp/data_CR)에서 최신 데이터를 zip으로 다운로드.
     - .last_update 타임스탬프를 확인하여 1일 미만이면 스킵
     - spectra_latest 파일 변경 시 dataset/bayer/ 삭제 → 재전처리 유도
     - binary_dataset 파일은 로컬에 없을 때만 복사
     - 다운로드 실패 시 경고만 출력하고 기존 데이터로 진행
+
+    Args:
+        data_dir: data_CR-main 디렉토리 경로
+        cfg_dir: CR_recon 디렉토리 경로 (spectra 변경 감지 시 bayer/ 삭제용)
     """
     data_dir = Path(data_dir)
     last_update_file = data_dir / ".last_update"
+
+    # spectra 해시 저장 파일
+    spectra_hash_file = data_dir / ".spectra_hash"
 
     # 1) 최신 여부 확인
     if last_update_file.exists():
@@ -67,7 +75,7 @@ def ensure_latest_data(data_dir):
             if elapsed < UPDATE_INTERVAL_SEC:
                 hours = elapsed / 3600
                 print(f"[INFO] 데이터 최신 상태 (마지막 업데이트: {hours:.1f}시간 전)")
-                return
+                return False  # spectra 변경 없음
         except (ValueError, OSError):
             pass  # 파일 손상 → 업데이트 진행
 
@@ -76,6 +84,14 @@ def ensure_latest_data(data_dir):
     # spectra 파일의 기존 해시 기록 (변경 감지용)
     spectra_files = ["spectra_latest_0.npy", "spectra_latest_1.npy"]
     old_hashes = {}
+    if spectra_hash_file.exists():
+        try:
+            import json
+            old_hashes = json.loads(spectra_hash_file.read_text())
+        except:
+            pass
+
+    # 현재 파일의 해시
     for name in spectra_files:
         path = data_dir / name
         if path.exists():
@@ -153,24 +169,35 @@ def ensure_latest_data(data_dir):
 
         # 6) spectra 변경 감지 → dataset/bayer/ 삭제
         spectra_changed = False
+        new_hashes = {}
         for name in spectra_files:
             path = data_dir / name
             if path.exists():
                 new_hash = _md5(path)
+                new_hashes[name] = new_hash
                 old_hash = old_hashes.get(name)
                 if old_hash is None or old_hash != new_hash:
                     spectra_changed = True
-                    break
+                    print(f"[INFO] {name}가 변경되었습니다.")
             elif name in old_hashes:
                 # 이전에 있었는데 새 zip에 없다면 변경으로 간주
                 spectra_changed = True
-                break
+                print(f"[INFO] {name}이 제거되었습니다.")
+
+        # spectra 해시 저장
+        if new_hashes:
+            spectra_hash_file.write_text(json.dumps(new_hashes))
 
         if spectra_changed:
-            bayer_dir = data_dir.parent / "code" / "CR_recon" / "dataset" / "bayer"
-            if bayer_dir.exists():
-                print("[INFO] spectra 데이터가 변경되었습니다. 전처리 데이터를 삭제합니다.")
-                shutil.rmtree(str(bayer_dir))
+            # cfg_dir이 주어진 경우 dataset/bayer/ 삭제
+            if cfg_dir:
+                bayer_dir = Path(cfg_dir) / "dataset" / "bayer"
+                if bayer_dir.exists():
+                    print("[INFO] spectra 데이터가 변경되었습니다. 전처리 데이터를 삭제합니다.")
+                    shutil.rmtree(str(bayer_dir))
+                    return True  # 재전처리 필요
+            else:
+                print("[INFO] spectra 데이터가 변경되었습니다.")
 
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
         print(f"\n[WARN] 데이터 다운로드 최종 실패: {type(e).__name__}: {e}")
@@ -189,6 +216,8 @@ def ensure_latest_data(data_dir):
             os.remove(tmp_zip)
         if tmp_dir and os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return False  # 다운로드 실패 또는 spectra 변경 없음
 
 
 def ensure_preprocessed_data(cfg_dir):
@@ -287,12 +316,13 @@ def main():
     cfg_file_path = Path(args.config).resolve()
     cfg_dir = cfg_file_path.parent.parent  # configs/default.yaml → CR_recon/
 
-    # GitHub에서 최신 데이터 다운로드
+    # GitHub에서 최신 데이터 다운로드 (spectra 변경 시 재전처리)
     data_dir = cfg_dir.parent / "data_CR-main"
-    ensure_latest_data(data_dir)
+    spectra_changed = ensure_latest_data(data_dir, cfg_dir) or False
 
     # 정제된 데이터 확인 및 자동 생성
-    if not ensure_preprocessed_data(cfg_dir):
+    # spectra가 변경되었으면 무조건 재전처리
+    if spectra_changed or not ensure_preprocessed_data(cfg_dir):
         print("\n[ERROR] 데이터 정제에 실패했습니다. 학습을 시작할 수 없습니다.")
         sys.exit(1)
 
