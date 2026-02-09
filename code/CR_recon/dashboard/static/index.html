@@ -993,6 +993,16 @@
                     '$$L = ' + wM + ' \\cdot L_{\\text{MSE}} + ' + wC + ' \\cdot L_{\\text{Corr}}$$' +
                     '<div style="font-size:11px;margin-top:2px">$L_{\\text{MSE}} = \\frac{1}{N}\\sum(\\hat{y}_i - y_i)^2$ &nbsp;&nbsp; ' +
                     '$L_{\\text{Corr}} = \\frac{1}{N}\\sum(1 - r_i)$</div></div>';
+            } else if (lossName === 'mse_corr_l1') {
+                const wM = (lossParams.w_mse !== undefined) ? lossParams.w_mse : 1.0;
+                const wC = (lossParams.w_corr !== undefined) ? lossParams.w_corr : 0.2;
+                const wL = (lossParams.w_l1 !== undefined) ? lossParams.w_l1 : 0.1;
+                const bw = (lossParams.blue_weight !== undefined) ? lossParams.blue_weight : 1.0;
+                lHTML = '<div style="margin-bottom:8px"><strong>MSE + Pearson Corr + L1</strong></div>' +
+                    '<div style="font-size:12px;line-height:2">' +
+                    '$$L = ' + wM + ' \\cdot L_{\\text{MSE}} + ' + wC + ' \\cdot L_{\\text{Corr}} + ' + wL + ' \\cdot L_{\\ell_1}$$' +
+                    '<div style="font-size:11px;margin-top:2px">Parameters: ' +
+                    '<span style="font-family:monospace">blue_weight=' + bw + '</span></div></div>';
             } else if (lossName === 'weighted_smooth') {
                 const l1 = lossParams.lambda1 || 0.1, l2 = lossParams.lambda2 || 0.05;
                 lHTML = '<div style="margin-bottom:8px"><strong>Weighted MSE + Smoothness</strong></div>' +
