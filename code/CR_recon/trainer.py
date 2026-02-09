@@ -63,6 +63,14 @@ class Trainer:
         loss_params = cfg["loss"]["params"]
         self.loss_fn = get_loss(loss_name, **loss_params)
 
+        # Output constraint configuration (see constraints.py + data/dataset.py sign convention)
+        constraints_cfg = cfg.get("constraints", {}) if isinstance(cfg, dict) else {}
+        self.constraint_sum_min = float(constraints_cfg.get("sum_min", 0.45))
+        self.constraint_sum_max = float(constraints_cfg.get("sum_max", 0.95))
+        # Dataset currently returns targets in negative physical convention (bggr = -bggr),
+        # so enforce constraint in physical domain by default.
+        self.constraint_physical_is_negative = bool(constraints_cfg.get("physical_is_negative", True))
+
         # Optimizer
         lr = cfg["training"]["lr"]
         weight_decay = cfg["training"]["weight_decay"]
@@ -152,6 +160,12 @@ class Trainer:
         """한 epoch 학습, 평균 train loss 반환."""
         self.model.train()
         total_loss = 0.0
+        comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
+        comp_count = 0
+        corr_min = {"dp_norm_min": float("inf"), "dt_norm_min": float("inf"), "denom_min": float("inf"), "r_min": float("inf")}
+        corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0}
+        clamp_sum = {"frac_clamped": 0.0, "frac_low": 0.0, "frac_high": 0.0, "total_min": 0.0, "total_max": 0.0, "total_mean": 0.0}
+        clamp_count = 0
 
         pbar = tqdm(
             self.train_loader,
@@ -173,7 +187,13 @@ class Trainer:
             if self.use_amp:
                 with torch.amp.autocast("cuda", dtype=torch.float16):
                     out = self.model(x)
-                    out = enforce_intensity_sum_range(out)
+                    out, cstats = enforce_intensity_sum_range(
+                        out,
+                        sum_min=self.constraint_sum_min,
+                        sum_max=self.constraint_sum_max,
+                        physical_is_negative=self.constraint_physical_is_negative,
+                        return_stats=True,
+                    )
                     loss = self.loss_fn(out, y)
 
                 self.scaler.scale(loss).backward()
@@ -184,7 +204,13 @@ class Trainer:
                 self.scaler.update()
             else:
                 out = self.model(x)
-                out = enforce_intensity_sum_range(out)
+                out, cstats = enforce_intensity_sum_range(
+                    out,
+                    sum_min=self.constraint_sum_min,
+                    sum_max=self.constraint_sum_max,
+                    physical_is_negative=self.constraint_physical_is_negative,
+                    return_stats=True,
+                )
                 loss = self.loss_fn(out, y)
                 loss.backward()
                 if self.grad_clip > 0:
@@ -192,6 +218,32 @@ class Trainer:
                 self.optimizer.step()
 
             total_loss += float(loss.item())
+
+            # Loss component diagnostics (per-batch, averaged at epoch end)
+            if hasattr(self.loss_fn, "get_last_stats"):
+                try:
+                    st = self.loss_fn.get_last_stats() or {}
+                except Exception:
+                    st = {}
+                if "l_abs" in st and "l_dc" in st and "l_shape" in st:
+                    comp_sum["l_abs"] += float(st["l_abs"])
+                    comp_sum["l_dc"] += float(st["l_dc"])
+                    comp_sum["l_shape"] += float(st["l_shape"])
+                    comp_count += 1
+                for k in corr_sum.keys():
+                    if k in st and st[k] == st[k]:  # not NaN
+                        corr_sum[k] += float(st[k])
+                for k in corr_min.keys():
+                    if k in st and st[k] == st[k]:
+                        corr_min[k] = min(corr_min[k], float(st[k]))
+
+            # Constraint clamp diagnostics
+            if isinstance(cstats, dict) and cstats:
+                for k in clamp_sum.keys():
+                    if k in cstats and cstats[k] == cstats[k]:
+                        clamp_sum[k] += float(cstats[k])
+                clamp_count += 1
+
             lr_now = self.optimizer.param_groups[0]["lr"]
             pbar.set_postfix({
                 "loss": f"{loss.item():.6f}",
@@ -212,6 +264,19 @@ class Trainer:
                 })
 
         avg_loss = total_loss / max(1, len(self.train_loader))
+        if comp_count > 0 or clamp_count > 0:
+            comp = {k: (comp_sum[k] / max(1, comp_count)) for k in comp_sum.keys()}
+            corr = {k: (corr_sum[k] / max(1, comp_count)) for k in corr_sum.keys()}
+            clamp = {k: (clamp_sum[k] / max(1, clamp_count)) for k in clamp_sum.keys()}
+            self.log(
+                "[LOSS_DIAG][train] "
+                f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
+                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} "
+                f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e} "
+                f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
+                f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}",
+                True,
+            )
         return avg_loss
 
     @torch.no_grad()
@@ -219,6 +284,12 @@ class Trainer:
         """검증, 평균 val loss 반환."""
         self.model.eval()
         total_loss = 0.0
+        comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
+        comp_count = 0
+        corr_min = {"dp_norm_min": float("inf"), "dt_norm_min": float("inf"), "denom_min": float("inf"), "r_min": float("inf")}
+        corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0}
+        clamp_sum = {"frac_clamped": 0.0, "frac_low": 0.0, "frac_high": 0.0, "total_min": 0.0, "total_max": 0.0, "total_mean": 0.0}
+        clamp_count = 0
 
         pbar = tqdm(
             self.val_loader,
@@ -236,9 +307,38 @@ class Trainer:
             y = y.to(self.device, non_blocking=True)
 
             out = self.model(x)
-            out = enforce_intensity_sum_range(out)
+            out, cstats = enforce_intensity_sum_range(
+                out,
+                sum_min=self.constraint_sum_min,
+                sum_max=self.constraint_sum_max,
+                physical_is_negative=self.constraint_physical_is_negative,
+                return_stats=True,
+            )
             loss = self.loss_fn(out, y)
             total_loss += float(loss.item())
+
+            if hasattr(self.loss_fn, "get_last_stats"):
+                try:
+                    st = self.loss_fn.get_last_stats() or {}
+                except Exception:
+                    st = {}
+                if "l_abs" in st and "l_dc" in st and "l_shape" in st:
+                    comp_sum["l_abs"] += float(st["l_abs"])
+                    comp_sum["l_dc"] += float(st["l_dc"])
+                    comp_sum["l_shape"] += float(st["l_shape"])
+                    comp_count += 1
+                for k in corr_sum.keys():
+                    if k in st and st[k] == st[k]:
+                        corr_sum[k] += float(st[k])
+                for k in corr_min.keys():
+                    if k in st and st[k] == st[k]:
+                        corr_min[k] = min(corr_min[k], float(st[k]))
+
+            if isinstance(cstats, dict) and cstats:
+                for k in clamp_sum.keys():
+                    if k in cstats and cstats[k] == cstats[k]:
+                        clamp_sum[k] += float(cstats[k])
+                clamp_count += 1
 
             # 배치 진행 상황 대시보드에 전송 (5 배치마다 1회, 마지막 배치는 항상 전송)
             should_send = (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == total_batches
@@ -253,6 +353,19 @@ class Trainer:
                 })
 
         avg_loss = total_loss / max(1, len(self.val_loader))
+        if comp_count > 0 or clamp_count > 0:
+            comp = {k: (comp_sum[k] / max(1, comp_count)) for k in comp_sum.keys()}
+            corr = {k: (corr_sum[k] / max(1, comp_count)) for k in corr_sum.keys()}
+            clamp = {k: (clamp_sum[k] / max(1, clamp_count)) for k in clamp_sum.keys()}
+            self.log(
+                "[LOSS_DIAG][val] "
+                f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
+                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} "
+                f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e} "
+                f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
+                f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}",
+                True,
+            )
         return avg_loss
 
     def save_checkpoint(self, is_best: bool = False, periodic: bool = False):
@@ -382,6 +495,11 @@ class Trainer:
             self.log(f"  - Device: cuda ({gpu_name})", False)
         else:
             self.log(f"  - Device: {self.device}", False)
+        self.log(
+            f"  - Constraint Sum Range: [{self.constraint_sum_min}, {self.constraint_sum_max}] "
+            f"(physical_is_negative={self.constraint_physical_is_negative})",
+            False,
+        )
         self.log(f"  - Augment 180: {self.cfg['data'].get('augment_180', False)}", False)
 
         # Data 정보

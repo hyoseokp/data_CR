@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 
 
 def pearson_corr_loss_1d(pred_1d: torch.Tensor, tgt_1d: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -45,42 +46,90 @@ def get_abs_dc_shape_loss(
       beta: SmoothL1 beta parameter
       blue_weight: weight multiplier for Blue channel [1,1]
     """
+    class AbsDCShapeLoss(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self._last_stats = {}
 
-    def _weighted_smooth_l1(pred: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
-        if blue_weight == 1.0:
-            return F.smooth_l1_loss(pred, tgt, beta=beta)
-        w = torch.ones(1, 2, 2, 1, device=pred.device, dtype=pred.dtype)
-        w[0, 1, 1, 0] = blue_weight
-        loss = F.smooth_l1_loss(pred, tgt, beta=beta, reduction="none")
-        return (loss * w).mean()
+        def _weighted_smooth_l1(self, pred: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
+            if blue_weight == 1.0:
+                return F.smooth_l1_loss(pred, tgt, beta=beta)
+            w = torch.ones(1, 2, 2, 1, device=pred.device, dtype=pred.dtype)
+            w[0, 1, 1, 0] = blue_weight
+            loss = F.smooth_l1_loss(pred, tgt, beta=beta, reduction="none")
+            return (loss * w).mean()
 
-    def loss_fn(pred: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
-        pred = pred.float()
-        tgt = tgt.float()
+        def get_last_stats(self) -> dict:
+            # Return a copy so callers can't mutate internal state.
+            return dict(self._last_stats) if isinstance(self._last_stats, dict) else {}
 
-        # Numerical stability
-        pred = torch.clamp(pred, -1e3, 1e3)
-        tgt = torch.clamp(tgt, -1e3, 1e3)
+        def forward(self, pred: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
+            pred = pred.float()
+            tgt = tgt.float()
 
-        # Absolute loss (values)
-        l_abs = _weighted_smooth_l1(pred, tgt)
+            # Numerical stability
+            pred = torch.clamp(pred, -1e3, 1e3)
+            tgt = torch.clamp(tgt, -1e3, 1e3)
 
-        # DC loss (channel-wise mean across wavelength)
-        pred_dc = pred.mean(dim=-1)
-        tgt_dc = tgt.mean(dim=-1)
-        l_dc = _weighted_smooth_l1(pred_dc.unsqueeze(-1), tgt_dc.unsqueeze(-1))
+            # Absolute loss (values)
+            l_abs = self._weighted_smooth_l1(pred, tgt)
 
-        # Shape loss: Pearson correlation on first derivative along wavelength
-        if pred.shape[-1] >= 2:
-            dp = pred[..., 1:] - pred[..., :-1]
-            dt = tgt[..., 1:] - tgt[..., :-1]
-            B, _, _, Lm1 = dp.shape
-            l_shape = pearson_corr_loss_1d(dp.reshape(B * 4, Lm1), dt.reshape(B * 4, Lm1))
-        else:
-            l_shape = pred.new_tensor(0.0)
+            # DC loss (channel-wise mean across wavelength)
+            pred_dc = pred.mean(dim=-1)
+            tgt_dc = tgt.mean(dim=-1)
+            l_dc = self._weighted_smooth_l1(pred_dc.unsqueeze(-1), tgt_dc.unsqueeze(-1))
 
-        loss = w_abs * l_abs + w_dc * l_dc + w_shape * l_shape
-        return torch.clamp(loss, 0, 100)
+            # Shape loss: Pearson correlation on first derivative along wavelength.
+            # This can become ill-conditioned when dp/dt norms get very small.
+            if pred.shape[-1] >= 2:
+                dp = pred[..., 1:] - pred[..., :-1]
+                dt = tgt[..., 1:] - tgt[..., :-1]
+                B, _, _, Lm1 = dp.shape
 
-    return loss_fn
+                dp_flat = dp.reshape(B * 4, Lm1)
+                dt_flat = dt.reshape(B * 4, Lm1)
 
+                eps = 1e-8
+                p = dp_flat - dp_flat.mean(dim=-1, keepdim=True)
+                t = dt_flat - dt_flat.mean(dim=-1, keepdim=True)
+                p_norm = p.norm(dim=-1)
+                t_norm = t.norm(dim=-1)
+                denom = p_norm * t_norm + eps
+                r = (p * t).sum(dim=-1) / denom
+                l_shape = (1.0 - r).mean()
+
+                with torch.no_grad():
+                    self._last_stats = {
+                        "l_abs": float(l_abs.detach().item()),
+                        "l_dc": float(l_dc.detach().item()),
+                        "l_shape": float(l_shape.detach().item()),
+                        "r_mean": float(torch.nanmean(r.detach()).item()),
+                        "r_min": float(torch.nanmin(r.detach()).item()),
+                        "dp_norm_mean": float(torch.nanmean(dp_flat.detach().norm(dim=-1)).item()),
+                        "dp_norm_min": float(torch.nanmin(dp_flat.detach().norm(dim=-1)).item()),
+                        "dt_norm_mean": float(torch.nanmean(dt_flat.detach().norm(dim=-1)).item()),
+                        "dt_norm_min": float(torch.nanmin(dt_flat.detach().norm(dim=-1)).item()),
+                        "denom_min": float(torch.nanmin(denom.detach()).item()),
+                        "r_finite_frac": float(torch.isfinite(r.detach()).float().mean().item()),
+                    }
+            else:
+                l_shape = pred.new_tensor(0.0)
+                with torch.no_grad():
+                    self._last_stats = {
+                        "l_abs": float(l_abs.detach().item()),
+                        "l_dc": float(l_dc.detach().item()),
+                        "l_shape": 0.0,
+                        "r_mean": float("nan"),
+                        "r_min": float("nan"),
+                        "dp_norm_mean": float("nan"),
+                        "dp_norm_min": float("nan"),
+                        "dt_norm_mean": float("nan"),
+                        "dt_norm_min": float("nan"),
+                        "denom_min": float("nan"),
+                        "r_finite_frac": float("nan"),
+                    }
+
+            loss = w_abs * l_abs + w_dc * l_dc + w_shape * l_shape
+            return torch.clamp(loss, 0, 100)
+
+    return AbsDCShapeLoss()

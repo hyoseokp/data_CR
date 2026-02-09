@@ -18,6 +18,7 @@ def enforce_intensity_sum_range(
     sum_min: float = 0.45,
     sum_max: float = 0.95,
     physical_is_negative: bool = False,
+    return_stats: bool = False,
 ) -> torch.Tensor:
     """
     Enforce for each wavelength bin k:
@@ -32,11 +33,14 @@ def enforce_intensity_sum_range(
       pred: (B, 2, 2, L)
       sum_min/sum_max: desired bounds (in physical domain)
       physical_is_negative: if True, interpret physical intensities as `-pred`
+      return_stats: if True, return (tensor, stats_dict) where stats are detached floats
     """
     if pred.ndim != 4 or pred.shape[1:3] != (2, 2):
-        return pred
+        return (pred, {}) if return_stats else pred
 
-    phys = -pred if physical_is_negative else pred
+    # Do computations in fp32 for stability (this constraint can run under autocast).
+    orig_dtype = pred.dtype
+    phys = (-pred if physical_is_negative else pred).to(dtype=torch.float32)
 
     r = phys[:, 0, 0, :]
     g1 = phys[:, 0, 1, :]
@@ -44,9 +48,26 @@ def enforce_intensity_sum_range(
     b = phys[:, 1, 1, :]
 
     total = r + 0.5 * (g1 + g2) + b
+
+    stats = {}
+    if return_stats:
+        with torch.no_grad():
+            t = total.detach()
+            stats = {
+                "sum_min": float(sum_min),
+                "sum_max": float(sum_max),
+                "total_min": float(t.min().item()),
+                "total_max": float(t.max().item()),
+                "total_mean": float(t.mean().item()),
+                "frac_low": float((t < sum_min).float().mean().item()),
+                "frac_high": float((t > sum_max).float().mean().item()),
+                "frac_clamped": float(((t < sum_min) | (t > sum_max)).float().mean().item()),
+            }
+
     target = total.clamp(sum_min, sum_max)
 
     shift = (target - total) / 3.0  # because weights sum to 3
     phys = phys + shift[:, None, None, :]
 
-    return -phys if physical_is_negative else phys
+    out = (-phys if physical_is_negative else phys).to(dtype=orig_dtype)
+    return (out, stats) if return_stats else out
