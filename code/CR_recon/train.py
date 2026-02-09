@@ -21,6 +21,69 @@ from trainer import Trainer
 
 GITHUB_ZIP_URL = "https://github.com/hyoseokp/data_CR/archive/refs/heads/main.zip"
 UPDATE_INTERVAL_SEC = 86400  # 1일
+DATA_FILES = (
+    "binary_dataset_128_0.npy",
+    "binary_dataset_128_1.npy",
+    "spectra_latest_0.npy",
+    "spectra_latest_1.npy",
+)
+
+
+def _is_lfs_pointer(path: Path) -> bool:
+    """
+    Detect Git LFS pointer files (small text files that start with the LFS spec header).
+    If a repo has exceeded its LFS budget, downloads and zip archives often contain pointers,
+    not the actual binary data. Avoid overwriting real local data with pointers.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(200)
+        return b"version https://git-lfs.github.com/spec/v1" in head
+    except OSError:
+        return False
+
+
+def _looks_like_npy(path: Path) -> bool:
+    """Return True if file starts with NumPy .npy magic bytes."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(6) == b"\x93NUMPY"
+    except OSError:
+        return False
+
+
+def validate_data_files(data_dir: Path) -> bool:
+    """
+    Validate the presence of required data files.
+    This catches the common case where the repo uses Git LFS but the actual binaries
+    are unavailable (e.g., LFS quota exceeded), leaving small pointer files instead.
+    """
+    data_dir = Path(data_dir)
+    missing = []
+    bad = []
+    for name in DATA_FILES:
+        p = data_dir / name
+        if not p.exists():
+            missing.append(name)
+            continue
+        if _is_lfs_pointer(p) or not _looks_like_npy(p):
+            bad.append(name)
+
+    if missing or bad:
+        print("\n[ERROR] Required dataset files are missing or invalid.")
+        if missing:
+            print(f"  Missing: {', '.join(missing)}")
+        if bad:
+            print(f"  Invalid (likely Git LFS pointer, not a real .npy): {', '.join(bad)}")
+        print("\nHow to proceed:")
+        print("  - If you have the real .npy files, place them under: <repo_root>\\data_CR-main\\")
+        print("  - For a quick smoke test without large data:")
+        print("      .venv\\Scripts\\python scripts\\make_dummy_data.py --n 16")
+        print("      .venv\\Scripts\\python preprocess_data.py")
+        print("      .venv\\Scripts\\python train.py --config configs\\smoke.yaml --skip-data-update")
+        return False
+
+    return True
 
 
 def _md5(filepath):
@@ -110,26 +173,30 @@ def ensure_latest_data(data_dir):
         # 4) 파일 복사
         data_dir.mkdir(parents=True, exist_ok=True)
 
-        # binary_dataset 파일: 로컬에 없을 때만 복사 (대용량)
-        binary_files = ["binary_dataset_128_0.npy", "binary_dataset_128_1.npy"]
-        for name in binary_files:
+        # NOTE:
+        # - The GitHub zip contains the whole repository. We only want the data files.
+        # - If Git LFS bandwidth/quota is exceeded, these files may be LFS pointers, not real data.
+        #   Avoid overwriting existing real local data with pointer files.
+        for name in DATA_FILES:
             src = extracted_root / name
             dst = data_dir / name
-            if src.exists() and not dst.exists():
-                print(f"[INFO] 복사 중: {name} ({src.stat().st_size / (1 << 30):.1f} GB)")
-                shutil.copy2(str(src), str(dst))
+            if not src.exists():
+                continue
 
-        # spectra 및 기타 파일: 항상 복사 (덮어쓰기)
-        for item in extracted_root.iterdir():
-            if item.name in binary_files:
-                continue  # 위에서 처리
-            dst = data_dir / item.name
-            if item.is_file():
-                shutil.copy2(str(item), str(dst))
-            elif item.is_dir():
-                if dst.exists():
-                    shutil.rmtree(str(dst))
-                shutil.copytree(str(item), str(dst))
+            src_is_pointer = _is_lfs_pointer(src)
+            if src_is_pointer and dst.exists():
+                print(f"[WARN] Skip update for {name}: downloaded file looks like a Git LFS pointer.")
+                continue
+
+            # Keep large binary datasets unless missing.
+            if name.startswith("binary_dataset") and dst.exists():
+                continue
+
+            shutil.copy2(str(src), str(dst))
+            if src_is_pointer:
+                print(f"[WARN] {name} copied as LFS pointer (not real data).")
+            else:
+                print(f"[INFO] Updated {name} ({src.stat().st_size / (1 << 20):.1f} MB)")
 
         # 5) .last_update 기록
         last_update_file.write_text(str(time.time()))
@@ -190,8 +257,32 @@ def ensure_preprocessed_data(cfg_dir):
 
     # 모든 파일이 존재하는지 확인
     if all(f.exists() for f in required_files):
-        print("[INFO] 정제된 데이터가 이미 존재합니다. 재사용합니다.")
-        return True
+        # Raw data might have been downloaded/updated after preprocessing.
+        # If so, regenerate the preprocessed bayer files.
+        try:
+            repo_root = cfg_dir.parent.parent
+            data_dir = repo_root / "data_CR-main"
+            src_files = [
+                data_dir / "binary_dataset_128_0.npy",
+                data_dir / "binary_dataset_128_1.npy",
+                data_dir / "spectra_latest_0.npy",
+                data_dir / "spectra_latest_1.npy",
+            ]
+            if all(p.exists() for p in src_files):
+                latest_src = max(p.stat().st_mtime for p in src_files)
+                earliest_bayer = min(p.stat().st_mtime for p in required_files)
+                if latest_src > earliest_bayer:
+                    print("[INFO] Raw data files look newer than preprocessed outputs. Regenerating dataset/bayer/ ...")
+                    shutil.rmtree(str(bayer_dir))
+                else:
+                    print("[INFO] 정제된 데이터가 이미 존재합니다. 재사용합니다.")
+                    return True
+            else:
+                print("[INFO] 정제된 데이터가 이미 존재합니다. 재사용합니다.")
+                return True
+        except Exception:
+            print("[INFO] 정제된 데이터가 이미 존재합니다. 재사용합니다.")
+            return True
 
     # 정제된 데이터 없으면 자동 생성
     print("[INFO] 정제된 데이터를 찾을 수 없습니다.")
@@ -205,7 +296,7 @@ def ensure_preprocessed_data(cfg_dir):
 
     try:
         result = subprocess.run(
-            ["python", str(preprocess_script)],
+            [sys.executable, str(preprocess_script)],
             cwd=str(cfg_dir),
             capture_output=False,
             text=True,
@@ -252,6 +343,11 @@ def main():
         default=None,
         help="Path to checkpoint to load model weights only (train from epoch 0)"
     )
+    parser.add_argument(
+        "--skip-data-update",
+        action="store_true",
+        help="Skip fetching/updating data from GitHub zip (use local data as-is)"
+    )
 
     args = parser.parse_args()
 
@@ -262,13 +358,45 @@ def main():
         print(f"Error: {e}")
         sys.exit(1)
 
+
+    # Runtime environment info (helps debug CPU vs CUDA installs)
+    try:
+        import torch
+
+        print(f"[INFO] Python: {sys.executable}")
+        print(f"[INFO] Torch:  {torch.__version__}")
+        print(f"[INFO] CUDA available: {torch.cuda.is_available()} (torch.version.cuda={torch.version.cuda})")
+        if torch.cuda.is_available():
+            try:
+                print(f"[INFO] GPU:   {torch.cuda.get_device_name(0)}")
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[WARN] Failed to print torch runtime info: {e}")
+
     # CR_recon 디렉토리
     cfg_file_path = Path(args.config).resolve()
     cfg_dir = cfg_file_path.parent.parent  # configs/default.yaml → CR_recon/
 
     # GitHub에서 최신 데이터 다운로드
-    data_dir = cfg_dir.parent / "data_CR-main"
-    ensure_latest_data(data_dir)
+    # Canonical location: repo_root/data_CR-main (repo_root is .../data_CR)
+    repo_root = cfg_dir.parent.parent
+    data_dir = repo_root / "data_CR-main"
+    if not args.skip_data_update:
+        # If real data already exists locally, don't waste time/bandwidth re-downloading the repo zip.
+        if validate_data_files(data_dir):
+            try:
+                (Path(data_dir) / ".last_update").write_text(str(time.time()))
+            except OSError:
+                pass
+            print("[INFO] Local data files already present; skip GitHub update.")
+        else:
+            ensure_latest_data(data_dir)
+    else:
+        print("[INFO] Skip data update (using local data only).")
+
+    if not validate_data_files(data_dir):
+        sys.exit(1)
 
     # 정제된 데이터 확인 및 자동 생성
     if not ensure_preprocessed_data(cfg_dir):
@@ -281,7 +409,15 @@ def main():
         best_ckpt = Path(cfg_dir) / "outputs" / f"{cfg['model']['name']}_best.pt"
         if best_ckpt.exists():
             print(f"\n[INFO] 기존 best checkpoint 발견: {best_ckpt}")
-            choice = input("[선택] 기존 best 파라미터를 불러올까요? (y/n): ").strip().lower()
+            try:
+                if not sys.stdin or not sys.stdin.isatty():
+                    raise EOFError
+                choice = input("[선택] 기존 best 파라미터를 불러올까요? (y/n): ").strip().lower()
+            except EOFError:
+                choice = "n"
+                print("[INFO] No stdin available; training from scratch.")
+                print("[INFO] To initialize from a checkpoint, pass --init-weights <path>.")
+
             if choice == 'y':
                 init_weights = str(best_ckpt)
                 print(f"[INFO] best 파라미터를 불러와서 학습합니다.")

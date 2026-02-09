@@ -803,12 +803,24 @@
             }
         }
 
+        function escapeHtml(s) {
+            return String(s)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
         /* ===== MODEL INFO ===== */
         function displayModelInfo(modelName, modelParams, lossName, lossParams) {
             const box = document.getElementById('model-info-box');
             const mEl = document.getElementById('model-latex');
             const lEl = document.getElementById('loss-latex');
             let mHTML = '', lHTML = '';
+
+            modelParams = modelParams || {};
+            lossParams = lossParams || {};
 
             if (modelName === 'cnn_xattn') {
                 mHTML = '<div style="margin-bottom:8px"><strong>MetaSpec_CNNXAttn</strong></div>' +
@@ -838,18 +850,42 @@
                 lHTML = '<div style="margin-bottom:8px"><strong>Weighted MSE + Smoothness</strong></div>' +
                     '<div style="font-size:12px;line-height:2">' +
                     '$$L = L_{\\text{MSE}} + ' + l1 + ' \\cdot L_\\nabla + ' + l2 + ' \\cdot L_{\\nabla^2}$$</div>';
+            } else if (lossName === 'abs_dc_shape') {
+                const wA = (lossParams.w_abs !== undefined) ? lossParams.w_abs : 1.0;
+                const wD = (lossParams.w_dc !== undefined) ? lossParams.w_dc : 0.5;
+                const wS = (lossParams.w_shape !== undefined) ? lossParams.w_shape : 0.2;
+                const beta = (lossParams.beta !== undefined) ? lossParams.beta : 0.02;
+                const bw = (lossParams.blue_weight !== undefined) ? lossParams.blue_weight : 1.0;
+                lHTML = '<div style="margin-bottom:8px"><strong>Abs + DC + Shape</strong></div>' +
+                    '<div style="font-size:12px;line-height:2">' +
+                    '$$L = ' + wA + ' \\cdot \\text{SmoothL1}_\\beta(\\hat{y}, y)' +
+                    ' + ' + wD + ' \\cdot \\text{SmoothL1}_\\beta(\\mu_\\lambda(\\hat{y}), \\mu_\\lambda(y))' +
+                    ' + ' + wS + ' \\cdot (1 - \\text{corr}(\\Delta_\\lambda \\hat{y}, \\Delta_\\lambda y))$$' +
+                    '<div style="font-size:11px;margin-top:2px">Parameters: ' +
+                    '<span style="font-family:monospace">beta=' + beta + ', blue_weight=' + bw + '</span></div></div>';
             }
 
-            if (mHTML && lHTML) {
-                mEl.innerHTML = mHTML;
-                lEl.innerHTML = lHTML;
-                box.classList.add('show');
-                if (typeof katex !== 'undefined') {
-                    try {
-                        renderMathInElement(mEl, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
-                        renderMathInElement(lEl, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
-                    } catch (e) { console.warn('KaTeX failed:', e); }
-                }
+            if (!mHTML) {
+                const p = escapeHtml(JSON.stringify(modelParams || {}, null, 2));
+                mHTML = '<div style="margin-bottom:8px"><strong>' + escapeHtml(modelName || 'Unknown Model') + '</strong></div>' +
+                    '<pre style="font-size:11px;line-height:1.4;white-space:pre-wrap;max-height:140px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">' +
+                    p + '</pre>';
+            }
+            if (!lHTML) {
+                const p = escapeHtml(JSON.stringify(lossParams || {}, null, 2));
+                lHTML = '<div style="margin-bottom:8px"><strong>' + escapeHtml(lossName || 'Unknown Loss') + '</strong></div>' +
+                    '<pre style="font-size:11px;line-height:1.4;white-space:pre-wrap;max-height:140px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">' +
+                    p + '</pre>';
+            }
+
+            mEl.innerHTML = mHTML;
+            lEl.innerHTML = lHTML;
+            box.classList.add('show');
+            if (typeof katex !== 'undefined') {
+                try {
+                    renderMathInElement(mEl, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+                    renderMathInElement(lEl, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+                } catch (e) { console.warn('KaTeX failed:', e); }
             }
         }
 
@@ -910,9 +946,16 @@
                 if (data.progress) updateProgressBars(data);
 
                 // Model info (once)
-                if (!dashboard.modelInfoDisplayed && data.model_name && data.loss_name) {
-                    displayModelInfo(data.model_name, data.model_params, data.loss_name, data.loss_params);
-                    dashboard.modelInfoDisplayed = true;
+                if (data.model_name && data.loss_name) {
+                    const changed =
+                        (dashboard.lastModelName !== data.model_name) ||
+                        (dashboard.lastLossName !== data.loss_name);
+                    if (!dashboard.modelInfoDisplayed || changed) {
+                        displayModelInfo(data.model_name, data.model_params, data.loss_name, data.loss_params);
+                        dashboard.modelInfoDisplayed = true;
+                        dashboard.lastModelName = data.model_name;
+                        dashboard.lastLossName = data.loss_name;
+                    }
                 }
 
                 // Loss chart

@@ -5,6 +5,7 @@ config 기반으로 모델/loss/데이터를 조립하여 학습을 실행한다
 import os
 import math
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any
@@ -21,6 +22,7 @@ from models import get_model
 from losses import get_loss
 from dashboard import DashboardServer
 from dashboard.hook import DashboardHook
+from constraints import enforce_intensity_sum_range
 
 
 class Trainer:
@@ -155,8 +157,10 @@ class Trainer:
             self.train_loader,
             desc=f"Epoch {self.current_epoch+1}",
             leave=True,
-            ncols=100,
-            disable=False
+            dynamic_ncols=True,
+            mininterval=0.3,
+            file=sys.stdout,
+            disable=False,
         )
 
         total_batches = len(self.train_loader)
@@ -169,6 +173,7 @@ class Trainer:
             if self.use_amp:
                 with torch.amp.autocast("cuda", dtype=torch.float16):
                     out = self.model(x)
+                    out = enforce_intensity_sum_range(out)
                     loss = self.loss_fn(out, y)
 
                 self.scaler.scale(loss).backward()
@@ -179,6 +184,7 @@ class Trainer:
                 self.scaler.update()
             else:
                 out = self.model(x)
+                out = enforce_intensity_sum_range(out)
                 loss = self.loss_fn(out, y)
                 loss.backward()
                 if self.grad_clip > 0:
@@ -218,8 +224,10 @@ class Trainer:
             self.val_loader,
             desc="Validation",
             leave=False,
-            ncols=100,
-            disable=False
+            dynamic_ncols=True,
+            mininterval=0.3,
+            file=sys.stdout,
+            disable=False,
         )
 
         total_batches = len(self.val_loader)
@@ -228,6 +236,7 @@ class Trainer:
             y = y.to(self.device, non_blocking=True)
 
             out = self.model(x)
+            out = enforce_intensity_sum_range(out)
             loss = self.loss_fn(out, y)
             total_loss += float(loss.item())
 
@@ -362,6 +371,14 @@ class Trainer:
         self.log(f"  - Gradient Clip: {self.cfg['training']['grad_clip']}", False)
         self.log(f"  - Warmup Ratio: {self.cfg['training']['warmup_ratio']}", False)
         self.log(f"  - Use AMP: {self.use_amp}", False)
+        if self.device.type == "cuda":
+            try:
+                gpu_name = torch.cuda.get_device_name(0)
+            except Exception:
+                gpu_name = "unknown"
+            self.log(f"  - Device: cuda ({gpu_name})", False)
+        else:
+            self.log(f"  - Device: {self.device}", False)
         self.log(f"  - Augment 180: {self.cfg['data'].get('augment_180', False)}", False)
 
         # Data 정보

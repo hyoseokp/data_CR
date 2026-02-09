@@ -6,11 +6,11 @@ seed: 42
 
 data:
   struct_files:
-    - "../data_CR-main/binary_dataset_128_0.npy"
-    - "../data_CR-main/binary_dataset_128_1.npy"
+    - "../../data_CR-main/binary_dataset_128_0.npy"
+    - "../../data_CR-main/binary_dataset_128_1.npy"
   spectra_files:
-    - "../data_CR-main/spectra_latest_0.npy"
-    - "../data_CR-main/spectra_latest_1.npy"
+    - "../../data_CR-main/spectra_latest_0.npy"
+    - "../../data_CR-main/spectra_latest_1.npy"
   out_len: 30
   map_to_pm1: true
   augment_180: true

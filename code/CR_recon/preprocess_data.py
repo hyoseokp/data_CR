@@ -73,11 +73,11 @@ def main():
     print("="*80)
 
     # 경로 계산
-    # preprocess_data.py: plan-dl-cr-dashboard/code/CR_recon/
+    # preprocess_data.py: <repo_root>/code/CR_recon/preprocess_data.py
     cr_recon_dir = Path(__file__).parent  # CR_recon/
-    plan_dir = cr_recon_dir.parent.parent  # plan-dl-cr-dashboard/
+    repo_root = cr_recon_dir.parent.parent  # <repo_root>/
 
-    data_dir = plan_dir / "data_CR-main"
+    data_dir = repo_root / "data_CR-main"
     output_dir = cr_recon_dir / "dataset" / "bayer"
 
     # 출력 디렉토리 생성

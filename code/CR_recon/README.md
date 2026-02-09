@@ -5,14 +5,22 @@
 ## Setup
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+.venv\\Scripts\\python -m pip install -U pip
+.venv\\Scripts\\pip install -r requirements.txt
+
+# If `import torch` fails on Windows with a DLL load error, install/update:
+#   Microsoft Visual C++ Redistributable 2015-2022 (x64)
+# and/or install the CPU-only wheel:
+.venv\\Scripts\\pip uninstall -y torch
+.venv\\Scripts\\pip install --index-url https://download.pytorch.org/whl/cpu torch
 ```
 
 ## Quick Start
 
 ```bash
 cd code/CR_recon
-set PYTHONIOENCODING=utf-8&&C:/anaconda3/python.exe train.py --config configs/default.yaml
+.venv\\Scripts\\python train.py --config configs/default.yaml
 ```
 
 실행하면 기존 best checkpoint이 있을 경우 자동으로 물어봅니다:
@@ -41,6 +49,30 @@ python train.py --config configs/default.yaml --resume outputs/cnn_xattn_last.pt
 # best 가중치만 불러와서 새로 학습
 python train.py --config configs/default.yaml --init-weights outputs/cnn_xattn_best.pt
 ```
+
+## Smoke Test (No Large Data)
+
+If you don't have the large `data_CR-main/*.npy` files (or Git LFS download is unavailable), you can still verify the pipeline end-to-end:
+
+```bash
+cd code/CR_recon
+.venv\\Scripts\\python scripts\\make_dummy_data.py --n 16
+.venv\\Scripts\\python preprocess_data.py
+.venv\\Scripts\\python train.py --config configs/smoke.yaml --skip-data-update
+```
+
+## Download Real Data (ZIP)
+
+If you want to fetch the real `.npy` files from the GitHub repo archive and place them under `<repo_root>\\data_CR-main\\`:
+
+```bash
+cd code/CR_recon
+.venv\\Scripts\\python scripts\\fetch_data_zip.py --force
+```
+
+## Additional CLI
+
+- `--skip-data-update`: Skip GitHub zip based auto data update and use local `data_CR-main/` as-is.
 
 ## Auto Features
 

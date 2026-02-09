@@ -6,11 +6,11 @@ seed: 42
 
 data:
   struct_files:
-    - "../data_CR-main/binary_dataset_128_0.npy"
-    - "../data_CR-main/binary_dataset_128_1.npy"
+    - "../../data_CR-main/binary_dataset_128_0.npy"
+    - "../../data_CR-main/binary_dataset_128_1.npy"
   spectra_files:
-    - "../data_CR-main/spectra_latest_0.npy"
-    - "../data_CR-main/spectra_latest_1.npy"
+    - "../../data_CR-main/spectra_latest_0.npy"
+    - "../../data_CR-main/spectra_latest_1.npy"
   out_len: 30
   map_to_pm1: true
   augment_180: true
@@ -31,10 +31,12 @@ model:
     use_circular_padding: true
 
 loss:
-  name: "mse_pearson"
+  name: "abs_dc_shape"
   params:
-    w_mse: 1.0
-    w_corr: 0.2
+    w_abs: 1.0
+    w_dc: 0.5
+    w_shape: 0.2
+    beta: 0.02
 
 training:
   epochs: 5
