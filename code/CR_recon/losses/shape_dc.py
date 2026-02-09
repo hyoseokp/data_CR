@@ -29,6 +29,25 @@ def pearson_corr_loss_1d(pred_1d: torch.Tensor, tgt_1d: torch.Tensor, eps: float
     return (1.0 - r).mean()
 
 
+def _finite_reduce(x: torch.Tensor, reduce: str) -> torch.Tensor:
+    """
+    Reduce over all elements, ignoring non-finite values.
+    Returns NaN if there are no finite elements.
+
+    Works on older torch builds without torch.nanmin/nanmean/nanmax.
+    """
+    xf = x[torch.isfinite(x)]
+    if xf.numel() == 0:
+        return torch.tensor(float("nan"), device=x.device, dtype=torch.float32)
+    if reduce == "min":
+        return xf.min()
+    if reduce == "max":
+        return xf.max()
+    if reduce == "mean":
+        return xf.mean()
+    raise ValueError(f"Unknown reduce: {reduce}")
+
+
 def get_abs_dc_shape_loss(
     w_abs: float = 1.0,
     w_dc: float = 0.5,
@@ -103,13 +122,13 @@ def get_abs_dc_shape_loss(
                         "l_abs": float(l_abs.detach().item()),
                         "l_dc": float(l_dc.detach().item()),
                         "l_shape": float(l_shape.detach().item()),
-                        "r_mean": float(torch.nanmean(r.detach()).item()),
-                        "r_min": float(torch.nanmin(r.detach()).item()),
-                        "dp_norm_mean": float(torch.nanmean(dp_flat.detach().norm(dim=-1)).item()),
-                        "dp_norm_min": float(torch.nanmin(dp_flat.detach().norm(dim=-1)).item()),
-                        "dt_norm_mean": float(torch.nanmean(dt_flat.detach().norm(dim=-1)).item()),
-                        "dt_norm_min": float(torch.nanmin(dt_flat.detach().norm(dim=-1)).item()),
-                        "denom_min": float(torch.nanmin(denom.detach()).item()),
+                        "r_mean": float(_finite_reduce(r.detach(), "mean").item()),
+                        "r_min": float(_finite_reduce(r.detach(), "min").item()),
+                        "dp_norm_mean": float(_finite_reduce(dp_flat.detach().norm(dim=-1), "mean").item()),
+                        "dp_norm_min": float(_finite_reduce(dp_flat.detach().norm(dim=-1), "min").item()),
+                        "dt_norm_mean": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "mean").item()),
+                        "dt_norm_min": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "min").item()),
+                        "denom_min": float(_finite_reduce(denom.detach(), "min").item()),
                         "r_finite_frac": float(torch.isfinite(r.detach()).float().mean().item()),
                     }
             else:
