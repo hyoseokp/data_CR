@@ -1003,14 +1003,19 @@
                 const wD = (lossParams.w_dc !== undefined) ? lossParams.w_dc : 0.5;
                 const wS = (lossParams.w_shape !== undefined) ? lossParams.w_shape : 0.2;
                 const beta = (lossParams.beta !== undefined) ? lossParams.beta : 0.02;
+                const sKind = (lossParams.shape_kind !== undefined) ? String(lossParams.shape_kind) : 'smoothl1';
+                const sBeta = (lossParams.shape_beta !== undefined) ? lossParams.shape_beta : beta;
                 const bw = (lossParams.blue_weight !== undefined) ? lossParams.blue_weight : 1.0;
+                const shapeTerm = (sKind === 'mse')
+                    ? ('\\text{MSE}(\\Delta_\\lambda \\hat{y}, \\Delta_\\lambda y)')
+                    : ('\\text{SmoothL1}_{\\beta_s}(\\Delta_\\lambda \\hat{y}, \\Delta_\\lambda y)');
                 lHTML = '<div style="margin-bottom:8px"><strong>Abs + DC + Shape</strong></div>' +
                     '<div style="font-size:12px;line-height:2">' +
                     '$$L = ' + wA + ' \\cdot \\text{SmoothL1}_\\beta(\\hat{y}, y)' +
                     ' + ' + wD + ' \\cdot \\text{SmoothL1}_\\beta(\\mu_\\lambda(\\hat{y}), \\mu_\\lambda(y))' +
-                    ' + ' + wS + ' \\cdot (1 - \\text{corr}(\\Delta_\\lambda \\hat{y}, \\Delta_\\lambda y))$$' +
+                    ' + ' + wS + ' \\cdot ' + shapeTerm + '$$' +
                     '<div style="font-size:11px;margin-top:2px">Parameters: ' +
-                    '<span style="font-family:monospace">beta=' + beta + ', blue_weight=' + bw + '</span></div></div>';
+                    '<span style="font-family:monospace">beta=' + beta + ', shape_kind=' + escapeHtml(sKind) + ', beta_s=' + sBeta + ', blue_weight=' + bw + '</span></div></div>';
             }
 
             if (!mHTML) {

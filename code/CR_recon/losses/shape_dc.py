@@ -57,6 +57,8 @@ def get_abs_dc_shape_loss(
     corr_eps: float = 1e-8,
     corr_norm_floor: float = 1e-3,
     corr_denom_floor: float = 1e-4,
+    shape_kind: str = "smoothl1",
+    shape_beta: float = 0.02,
 ) -> callable:
     """
     Factory function.
@@ -70,18 +72,21 @@ def get_abs_dc_shape_loss(
       corr_eps: epsilon added to correlation denominator
       corr_norm_floor: if either norm is below this, skip shape term for that sample
       corr_denom_floor: clamp denominator to at least this to avoid ill-conditioned division
+      shape_kind: shape term type over wavelength-derivative. One of: "smoothl1", "mse", "pearson".
+      shape_beta: SmoothL1 beta for derivative loss when shape_kind="smoothl1".
     """
     class AbsDCShapeLoss(nn.Module):
         def __init__(self):
             super().__init__()
             self._last_stats = {}
 
-        def _weighted_smooth_l1(self, pred: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
+        def _weighted_smooth_l1(self, pred: torch.Tensor, tgt: torch.Tensor, beta_override: float | None = None) -> torch.Tensor:
+            b = beta if beta_override is None else float(beta_override)
             if blue_weight == 1.0:
-                return F.smooth_l1_loss(pred, tgt, beta=beta)
+                return F.smooth_l1_loss(pred, tgt, beta=b)
             w = torch.ones(1, 2, 2, 1, device=pred.device, dtype=pred.dtype)
             w[0, 1, 1, 0] = blue_weight
-            loss = F.smooth_l1_loss(pred, tgt, beta=beta, reduction="none")
+            loss = F.smooth_l1_loss(pred, tgt, beta=b, reduction="none")
             return (loss * w).mean()
 
         def get_last_stats(self) -> dict:
@@ -105,54 +110,80 @@ def get_abs_dc_shape_loss(
             l_dc = self._weighted_smooth_l1(pred_dc.unsqueeze(-1), tgt_dc.unsqueeze(-1))
 
             # Shape loss: Pearson correlation on first derivative along wavelength.
-            # This can become ill-conditioned when dp/dt norms get very small.
+            # Default is derivative SmoothL1 (more stable than Pearson corr).
             if pred.shape[-1] >= 2:
                 dp = pred[..., 1:] - pred[..., :-1]
                 dt = tgt[..., 1:] - tgt[..., :-1]
                 B, _, _, Lm1 = dp.shape
 
-                dp_flat = dp.reshape(B * 4, Lm1)
-                dt_flat = dt.reshape(B * 4, Lm1)
+                if shape_kind == "pearson":
+                    # Kept for backward-compatibility; may be unstable.
+                    dp_flat = dp.reshape(B * 4, Lm1)
+                    dt_flat = dt.reshape(B * 4, Lm1)
 
-                p = dp_flat - dp_flat.mean(dim=-1, keepdim=True)
-                t = dt_flat - dt_flat.mean(dim=-1, keepdim=True)
-                p_norm = p.norm(dim=-1)
-                t_norm = t.norm(dim=-1)
-                denom_raw = p_norm * t_norm
-                valid = (p_norm > corr_norm_floor) & (t_norm > corr_norm_floor)
-                denom = torch.clamp(denom_raw, min=corr_denom_floor) + corr_eps
+                    p = dp_flat - dp_flat.mean(dim=-1, keepdim=True)
+                    t = dt_flat - dt_flat.mean(dim=-1, keepdim=True)
+                    p_norm = p.norm(dim=-1)
+                    t_norm = t.norm(dim=-1)
+                    denom_raw = p_norm * t_norm
+                    valid = (p_norm > corr_norm_floor) & (t_norm > corr_norm_floor)
+                    denom = torch.clamp(denom_raw, min=corr_denom_floor) + corr_eps
 
-                r = (p * t).sum(dim=-1) / denom
-                r = r.clamp(-1.0, 1.0)
+                    r = (p * t).sum(dim=-1) / denom
+                    r = r.clamp(-1.0, 1.0)
 
-                if valid.any():
-                    r_valid = r[valid]
-                    l_shape = (1.0 - r_valid).mean()
-                    valid_frac = float(valid.float().mean().item())
+                    if valid.any():
+                        r_valid = r[valid]
+                        l_shape = (1.0 - r_valid).mean()
+                        valid_frac = float(valid.float().mean().item())
+                    else:
+                        l_shape = pred.new_tensor(0.0)
+                        valid_frac = 0.0
+
+                    with torch.no_grad():
+                        self._last_stats = {
+                            "shape_kind": "pearson",
+                            "l_abs": float(l_abs.detach().item()),
+                            "l_dc": float(l_dc.detach().item()),
+                            "l_shape": float(l_shape.detach().item()),
+                            "r_mean": float(_finite_reduce(r.detach(), "mean").item()),
+                            "r_min": float(_finite_reduce(r.detach(), "min").item()),
+                            "dp_norm_mean": float(_finite_reduce(dp_flat.detach().norm(dim=-1), "mean").item()),
+                            "dp_norm_min": float(_finite_reduce(dp_flat.detach().norm(dim=-1), "min").item()),
+                            "dt_norm_mean": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "mean").item()),
+                            "dt_norm_min": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "min").item()),
+                            "denom_min": float(_finite_reduce(denom.detach(), "min").item()),
+                            "shape_valid_frac": float(valid_frac),
+                            "r_finite_frac": float(torch.isfinite(r.detach()).float().mean().item()),
+                        }
                 else:
-                    # If derivatives are too flat to define a stable correlation, don't use shape loss.
-                    l_shape = pred.new_tensor(0.0)
-                    valid_frac = 0.0
+                    # Stable shape: match first derivative directly.
+                    if shape_kind == "mse":
+                        w = torch.ones(1, 2, 2, 1, device=dp.device, dtype=dp.dtype)
+                        if blue_weight != 1.0:
+                            w[0, 1, 1, 0] = blue_weight
+                        diff2 = (dp - dt) ** 2
+                        l_shape = (diff2 * w).mean()
+                        d1_err = torch.sqrt(diff2 + 1e-12)
+                    else:
+                        # default: smoothl1
+                        l_shape = self._weighted_smooth_l1(dp, dt, beta_override=shape_beta)
+                        d1_err = (dp - dt).abs()
 
-                with torch.no_grad():
-                    self._last_stats = {
-                        "l_abs": float(l_abs.detach().item()),
-                        "l_dc": float(l_dc.detach().item()),
-                        "l_shape": float(l_shape.detach().item()),
-                        "r_mean": float(_finite_reduce(r.detach(), "mean").item()),
-                        "r_min": float(_finite_reduce(r.detach(), "min").item()),
-                        "dp_norm_mean": float(_finite_reduce(dp_flat.detach().norm(dim=-1), "mean").item()),
-                        "dp_norm_min": float(_finite_reduce(dp_flat.detach().norm(dim=-1), "min").item()),
-                        "dt_norm_mean": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "mean").item()),
-                        "dt_norm_min": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "min").item()),
-                        "denom_min": float(_finite_reduce(denom.detach(), "min").item()),
-                        "shape_valid_frac": float(valid_frac),
-                        "r_finite_frac": float(torch.isfinite(r.detach()).float().mean().item()),
-                    }
+                    with torch.no_grad():
+                        self._last_stats = {
+                            "shape_kind": "mse" if shape_kind == "mse" else "smoothl1",
+                            "l_abs": float(l_abs.detach().item()),
+                            "l_dc": float(l_dc.detach().item()),
+                            "l_shape": float(l_shape.detach().item()),
+                            "d1_err_mean": float(d1_err.detach().mean().item()),
+                            "d1_err_max": float(d1_err.detach().max().item()),
+                        }
             else:
                 l_shape = pred.new_tensor(0.0)
                 with torch.no_grad():
                     self._last_stats = {
+                        "shape_kind": shape_kind,
                         "l_abs": float(l_abs.detach().item()),
                         "l_dc": float(l_dc.detach().item()),
                         "l_shape": 0.0,
@@ -165,6 +196,8 @@ def get_abs_dc_shape_loss(
                         "denom_min": float("nan"),
                         "shape_valid_frac": float("nan"),
                         "r_finite_frac": float("nan"),
+                        "d1_err_mean": float("nan"),
+                        "d1_err_max": float("nan"),
                     }
 
             loss = w_abs * l_abs + w_dc * l_dc + w_shape * l_shape

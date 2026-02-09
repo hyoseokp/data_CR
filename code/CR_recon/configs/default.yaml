@@ -32,6 +32,8 @@ loss:
     w_abs: 1.0
     w_dc: 0.5
     w_shape: 0.2
+    shape_kind: "smoothl1"   # was derivative Pearson corr; smoothl1 is more stable
+    shape_beta: 0.02
     beta: 0.02
     blue_weight: 2.0
 

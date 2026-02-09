@@ -162,8 +162,12 @@ class Trainer:
         total_loss = 0.0
         comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
         comp_count = 0
+        shape_kind_seen = None
+        extra_sum = {"d1_err_mean": 0.0, "d1_err_max": 0.0}
+        extra_count = 0
         corr_min = {"dp_norm_min": float("inf"), "dt_norm_min": float("inf"), "denom_min": float("inf"), "r_min": float("inf")}
         corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0, "shape_valid_frac": 0.0}
+        corr_count = 0
         clamp_sum = {"frac_clamped": 0.0, "frac_low": 0.0, "frac_high": 0.0, "total_min": 0.0, "total_max": 0.0, "total_mean": 0.0}
         clamp_count = 0
 
@@ -225,17 +229,30 @@ class Trainer:
                     st = self.loss_fn.get_last_stats() or {}
                 except Exception:
                     st = {}
+                if shape_kind_seen is None and isinstance(st.get("shape_kind"), str):
+                    shape_kind_seen = st.get("shape_kind")
                 if "l_abs" in st and "l_dc" in st and "l_shape" in st:
                     comp_sum["l_abs"] += float(st["l_abs"])
                     comp_sum["l_dc"] += float(st["l_dc"])
                     comp_sum["l_shape"] += float(st["l_shape"])
                     comp_count += 1
+                # Derivative error stats (smoothl1/mse shape mode)
+                if "d1_err_mean" in st and "d1_err_max" in st and st["d1_err_mean"] == st["d1_err_mean"]:
+                    extra_sum["d1_err_mean"] += float(st["d1_err_mean"])
+                    extra_sum["d1_err_max"] += float(st["d1_err_max"])
+                    extra_count += 1
+                # Correlation stats (pearson shape mode)
+                corr_seen = False
                 for k in corr_sum.keys():
                     if k in st and st[k] == st[k]:  # not NaN
                         corr_sum[k] += float(st[k])
+                        corr_seen = True
                 for k in corr_min.keys():
                     if k in st and st[k] == st[k]:
                         corr_min[k] = min(corr_min[k], float(st[k]))
+                        corr_seen = True
+                if corr_seen:
+                    corr_count += 1
 
             # Constraint clamp diagnostics
             if isinstance(cstats, dict) and cstats:
@@ -266,17 +283,28 @@ class Trainer:
         avg_loss = total_loss / max(1, len(self.train_loader))
         if comp_count > 0 or clamp_count > 0:
             comp = {k: (comp_sum[k] / max(1, comp_count)) for k in comp_sum.keys()}
-            corr = {k: (corr_sum[k] / max(1, comp_count)) for k in corr_sum.keys()}
+            corr = {k: (corr_sum[k] / max(1, corr_count)) for k in corr_sum.keys()}
             clamp = {k: (clamp_sum[k] / max(1, clamp_count)) for k in clamp_sum.keys()}
-            self.log(
+            extra = {k: (extra_sum[k] / max(1, extra_count)) for k in extra_sum.keys()}
+            extra_bits = []
+            if shape_kind_seen:
+                extra_bits.append(f"shape_kind={shape_kind_seen}")
+            if extra_count > 0:
+                extra_bits.append(f"d1_mean={extra['d1_err_mean']:.3e} d1_max={extra['d1_err_max']:.3e}")
+            if corr_count > 0:
+                extra_bits.append(
+                    f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} "
+                    f"r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
+                    f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e}"
+                )
+            msg = (
                 "[LOSS_DIAG][train] "
                 f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
-                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
-                f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e} "
-                f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
-                f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}",
-                True,
+                + ((" ".join(extra_bits) + " ") if extra_bits else "")
+                + f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
+                + f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}"
             )
+            self.log(msg, True)
         return avg_loss
 
     @torch.no_grad()
@@ -286,8 +314,12 @@ class Trainer:
         total_loss = 0.0
         comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
         comp_count = 0
+        shape_kind_seen = None
+        extra_sum = {"d1_err_mean": 0.0, "d1_err_max": 0.0}
+        extra_count = 0
         corr_min = {"dp_norm_min": float("inf"), "dt_norm_min": float("inf"), "denom_min": float("inf"), "r_min": float("inf")}
         corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0, "shape_valid_frac": 0.0}
+        corr_count = 0
         clamp_sum = {"frac_clamped": 0.0, "frac_low": 0.0, "frac_high": 0.0, "total_min": 0.0, "total_max": 0.0, "total_mean": 0.0}
         clamp_count = 0
 
@@ -322,17 +354,28 @@ class Trainer:
                     st = self.loss_fn.get_last_stats() or {}
                 except Exception:
                     st = {}
+                if shape_kind_seen is None and isinstance(st.get("shape_kind"), str):
+                    shape_kind_seen = st.get("shape_kind")
                 if "l_abs" in st and "l_dc" in st and "l_shape" in st:
                     comp_sum["l_abs"] += float(st["l_abs"])
                     comp_sum["l_dc"] += float(st["l_dc"])
                     comp_sum["l_shape"] += float(st["l_shape"])
                     comp_count += 1
+                if "d1_err_mean" in st and "d1_err_max" in st and st["d1_err_mean"] == st["d1_err_mean"]:
+                    extra_sum["d1_err_mean"] += float(st["d1_err_mean"])
+                    extra_sum["d1_err_max"] += float(st["d1_err_max"])
+                    extra_count += 1
+                corr_seen = False
                 for k in corr_sum.keys():
                     if k in st and st[k] == st[k]:
                         corr_sum[k] += float(st[k])
+                        corr_seen = True
                 for k in corr_min.keys():
                     if k in st and st[k] == st[k]:
                         corr_min[k] = min(corr_min[k], float(st[k]))
+                        corr_seen = True
+                if corr_seen:
+                    corr_count += 1
 
             if isinstance(cstats, dict) and cstats:
                 for k in clamp_sum.keys():
@@ -355,17 +398,28 @@ class Trainer:
         avg_loss = total_loss / max(1, len(self.val_loader))
         if comp_count > 0 or clamp_count > 0:
             comp = {k: (comp_sum[k] / max(1, comp_count)) for k in comp_sum.keys()}
-            corr = {k: (corr_sum[k] / max(1, comp_count)) for k in corr_sum.keys()}
+            corr = {k: (corr_sum[k] / max(1, corr_count)) for k in corr_sum.keys()}
             clamp = {k: (clamp_sum[k] / max(1, clamp_count)) for k in clamp_sum.keys()}
-            self.log(
+            extra = {k: (extra_sum[k] / max(1, extra_count)) for k in extra_sum.keys()}
+            extra_bits = []
+            if shape_kind_seen:
+                extra_bits.append(f"shape_kind={shape_kind_seen}")
+            if extra_count > 0:
+                extra_bits.append(f"d1_mean={extra['d1_err_mean']:.3e} d1_max={extra['d1_err_max']:.3e}")
+            if corr_count > 0:
+                extra_bits.append(
+                    f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} "
+                    f"r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
+                    f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e}"
+                )
+            msg = (
                 "[LOSS_DIAG][val] "
                 f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
-                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
-                f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e} "
-                f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
-                f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}",
-                True,
+                + ((" ".join(extra_bits) + " ") if extra_bits else "")
+                + f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
+                + f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}"
             )
+            self.log(msg, True)
         return avg_loss
 
     def save_checkpoint(self, is_best: bool = False, periodic: bool = False):
