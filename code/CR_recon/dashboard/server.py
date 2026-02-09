@@ -87,7 +87,7 @@ class DashboardServer:
         @self.app.get("/api/status")
         async def get_status():
             """현재 학습 상태 반환."""
-            return self.state
+            return _json_sanitize(self.state)
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
