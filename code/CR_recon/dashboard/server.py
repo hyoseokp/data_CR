@@ -117,7 +117,15 @@ class DashboardServer:
             """index.html 서빙."""
             static_path = Path(__file__).parent / "static" / "index.html"
             if static_path.exists():
-                return FileResponse(static_path)
+                # Avoid stale frontend during rapid iteration (browser cache can mask updates).
+                return FileResponse(
+                    static_path,
+                    headers={
+                        "Cache-Control": "no-store, max-age=0",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    },
+                )
             return {"message": "Dashboard frontend not found"}
 
     async def _broadcast(self, data: Dict[str, Any]):
