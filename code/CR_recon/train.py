@@ -84,11 +84,27 @@ def ensure_latest_data(data_dir):
     tmp_zip = None
     tmp_dir = None
     try:
-        # 2) zip 다운로드
+        # 2) zip 다운로드 (타임아웃 120초, 3회 재시도)
         print(f"[INFO] 다운로드 중: {GITHUB_ZIP_URL}")
         tmp_zip = tempfile.mktemp(suffix=".zip")
-        urllib.request.urlretrieve(GITHUB_ZIP_URL, tmp_zip, reporthook=_download_progress)
-        print()  # 진행률 줄바꿈
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # socket 타임아웃 설정 (120초)
+                import socket
+                socket.setdefaulttimeout(120)
+
+                urllib.request.urlretrieve(GITHUB_ZIP_URL, tmp_zip, reporthook=_download_progress)
+                print()  # 진행률 줄바꿈
+                break  # 성공하면 루프 탈출
+            except (TimeoutError, urllib.error.URLError, OSError) as e:
+                if attempt < max_retries - 1:
+                    print(f"\n[WARN] 다운로드 실패 (시도 {attempt+1}/{max_retries}): {e}")
+                    print("[INFO] 3초 후 재시도합니다...")
+                    time.sleep(3)
+                else:
+                    raise  # 마지막 시도 실패 → 상위 except로
 
         # 3) 압축 해제
         tmp_dir = tempfile.mkdtemp()
@@ -156,9 +172,14 @@ def ensure_latest_data(data_dir):
                 print("[INFO] spectra 데이터가 변경되었습니다. 전처리 데이터를 삭제합니다.")
                 shutil.rmtree(str(bayer_dir))
 
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
-        print(f"\n[WARN] 데이터 다운로드 실패: {e}")
-        print("[WARN] 기존 데이터로 진행합니다.")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
+        print(f"\n[WARN] 데이터 다운로드 최종 실패: {type(e).__name__}: {e}")
+        print("[WARN] 가능한 원인:")
+        print("       - 네트워크 연결 끊김")
+        print("       - GitHub 서버 응답 느림")
+        print("       - 파일 크기가 매우 큼 (수 GB)")
+        print("       - 방화벽 차단")
+        print("[WARN] 기존 데이터로 학습을 계속합니다.")
     except zipfile.BadZipFile:
         print("\n[WARN] 다운로드된 zip 파일이 손상되었습니다.")
         print("[WARN] 기존 데이터로 진행합니다.")
