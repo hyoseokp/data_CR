@@ -464,36 +464,78 @@
         </div>
     </div>
 
-    <!-- ===== VISUAL SAMPLES (THREE COMPACT COLUMNS) ===== -->
-    <div class="samples-row">
-        <div class="sample-card">
-            <div class="section-title">Input Structure (128x128)</div>
-            <div class="sample-canvas-wrap">
-                <canvas id="canvas-input" width="400" height="400" class="img-canvas"></canvas>
+    <!-- ===== SAMPLE TABS ===== -->
+    <div class="sample-card" style="margin-bottom: 12px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <button onclick="switchSampleTab('val')" id="tab-val-btn" style="flex:1; padding: 8px; background: var(--val-color); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Val Sample</button>
+            <button onclick="switchSampleTab('train')" id="tab-train-btn" style="flex:1; padding: 8px; background: #94a3b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">Train Sample</button>
+        </div>
+
+        <!-- VAL SAMPLE -->
+        <div id="val-sample-content" style="display: block;">
+            <div class="samples-row">
+                <div class="sample-card">
+                    <div class="section-title">Input Structure (128x128)</div>
+                    <div class="sample-canvas-wrap">
+                        <canvas id="canvas-input-val" width="400" height="400" class="img-canvas"></canvas>
+                    </div>
+                </div>
+                <div class="sample-card">
+                    <div class="section-title">GT BGGR (val)</div>
+                    <div class="sample-canvas-wrap" style="flex-direction: column; gap: 4px;">
+                        <div class="bggr-grid" id="gt-bggr-grid-val">
+                            <div class="bggr-cell" style="background:var(--r-color)"><span class="cell-label">R</span><span class="cell-value" id="gt-r-val-val">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="gt-g1-val-val">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="gt-g2-val-val">--</span></div>
+                            <div class="bggr-cell" style="background:var(--b-color)"><span class="cell-label">B</span><span class="cell-value" id="gt-b-val-val">--</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="sample-card">
+                    <div class="section-title">Pred BGGR (val)</div>
+                    <div class="sample-canvas-wrap" style="flex-direction: column; gap: 4px;">
+                        <div class="bggr-grid" id="pred-bggr-grid-val">
+                            <div class="bggr-cell" style="background:var(--r-color)"><span class="cell-label">R</span><span class="cell-value" id="pred-r-val-val">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="pred-g1-val-val">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="pred-g2-val-val">--</span></div>
+                            <div class="bggr-cell" style="background:var(--b-color)"><span class="cell-label">B</span><span class="cell-value" id="pred-b-val-val">--</span></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="sample-card">
-            <div class="section-title">GT BGGR (mean over wavelength)</div>
-            <div class="sample-canvas-wrap" style="flex-direction: column; gap: 4px;">
-                <div class="bggr-grid" id="gt-bggr-grid">
-                    <div class="bggr-cell" style="background:var(--r-color)"><span class="cell-label">R</span><span class="cell-value" id="gt-r-val">--</span></div>
-                    <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="gt-g1-val">--</span></div>
-                    <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="gt-g2-val">--</span></div>
-                    <div class="bggr-cell" style="background:var(--b-color)"><span class="cell-label">B</span><span class="cell-value" id="gt-b-val">--</span></div>
+
+        <!-- TRAIN SAMPLE -->
+        <div id="train-sample-content" style="display: none;">
+            <div class="samples-row">
+                <div class="sample-card">
+                    <div class="section-title">Input Structure (128x128)</div>
+                    <div class="sample-canvas-wrap">
+                        <canvas id="canvas-input-train" width="400" height="400" class="img-canvas"></canvas>
+                    </div>
                 </div>
-                <canvas id="canvas-gt-bggr" width="2" height="2" style="display:none;"></canvas>
-            </div>
-        </div>
-        <div class="sample-card">
-            <div class="section-title">Pred BGGR (mean over wavelength)</div>
-            <div class="sample-canvas-wrap" style="flex-direction: column; gap: 4px;">
-                <div class="bggr-grid" id="pred-bggr-grid">
-                    <div class="bggr-cell" style="background:var(--r-color)"><span class="cell-label">R</span><span class="cell-value" id="pred-r-val">--</span></div>
-                    <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="pred-g1-val">--</span></div>
-                    <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="pred-g2-val">--</span></div>
-                    <div class="bggr-cell" style="background:var(--b-color)"><span class="cell-label">B</span><span class="cell-value" id="pred-b-val">--</span></div>
+                <div class="sample-card">
+                    <div class="section-title">GT BGGR (train)</div>
+                    <div class="sample-canvas-wrap" style="flex-direction: column; gap: 4px;">
+                        <div class="bggr-grid" id="gt-bggr-grid-train">
+                            <div class="bggr-cell" style="background:var(--r-color)"><span class="cell-label">R</span><span class="cell-value" id="gt-r-val-train">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="gt-g1-val-train">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="gt-g2-val-train">--</span></div>
+                            <div class="bggr-cell" style="background:var(--b-color)"><span class="cell-label">B</span><span class="cell-value" id="gt-b-val-train">--</span></div>
+                        </div>
+                    </div>
                 </div>
-                <canvas id="canvas-pred-bggr" width="2" height="2" style="display:none;"></canvas>
+                <div class="sample-card">
+                    <div class="section-title">Pred BGGR (train)</div>
+                    <div class="sample-canvas-wrap" style="flex-direction: column; gap: 4px;">
+                        <div class="bggr-grid" id="pred-bggr-grid-train">
+                            <div class="bggr-cell" style="background:var(--r-color)"><span class="cell-label">R</span><span class="cell-value" id="pred-r-val-train">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="pred-g1-val-train">--</span></div>
+                            <div class="bggr-cell" style="background:var(--g-color)"><span class="cell-label">G</span><span class="cell-value" id="pred-g2-val-train">--</span></div>
+                            <div class="bggr-cell" style="background:var(--b-color)"><span class="cell-label">B</span><span class="cell-value" id="pred-b-val-train">--</span></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -534,8 +576,13 @@
 
         /* ===== CHART INIT ===== */
         function initCharts() {
-            if (typeof Chart === 'undefined') return;
+            console.log('📈 Chart.js 초기화 시작...');
+            if (typeof Chart === 'undefined') {
+                console.error('❌ Chart.js를 로드할 수 없습니다!');
+                return;
+            }
 
+            console.log('✅ Chart.js 로드됨');
             const gridColor = '#e2e8f0';
             const tickColor = '#94a3b8';
             const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -599,8 +646,15 @@
             );
 
             // Spectrum GT vs Pred
+            console.log('📊 스펙트럼 차트 초기화 중...');
+            const spectrumCanvas = document.getElementById('chart-spectrum');
+            if (!spectrumCanvas) {
+                console.error('❌ chart-spectrum 캔버스를 찾을 수 없습니다!');
+            } else {
+                console.log('✅ chart-spectrum 캔버스 찾음');
+            }
             dashboard.chartInstances.spectrum = new Chart(
-                document.getElementById('chart-spectrum'), {
+                spectrumCanvas, {
                     type: 'line',
                     data: {
                         labels: [],
@@ -656,8 +710,15 @@
             );
 
             // Error chart
+            console.log('📊 에러 차트 초기화 중...');
+            const errorCanvas = document.getElementById('chart-error');
+            if (!errorCanvas) {
+                console.error('❌ chart-error 캔버스를 찾을 수 없습니다!');
+            } else {
+                console.log('✅ chart-error 캔버스 찾음');
+            }
             dashboard.chartInstances.error = new Chart(
-                document.getElementById('chart-error'), {
+                errorCanvas, {
                     type: 'line',
                     data: {
                         labels: [],
@@ -709,6 +770,87 @@
             if (v >= 0.1) return v.toFixed(3);
             if (v >= 0.01) return v.toFixed(4);
             return v.toExponential(2);
+        }
+
+        /* ===== TAB SWITCHING ===== */
+        function switchSampleTab(tab) {
+            const valContent = document.getElementById('val-sample-content');
+            const trainContent = document.getElementById('train-sample-content');
+            const valBtn = document.getElementById('tab-val-btn');
+            const trainBtn = document.getElementById('tab-train-btn');
+
+            if (tab === 'val') {
+                if (valContent) valContent.style.display = 'block';
+                if (trainContent) trainContent.style.display = 'none';
+                if (valBtn) valBtn.style.background = 'var(--val-color)';
+                if (trainBtn) trainBtn.style.background = '#94a3b8';
+            } else if (tab === 'train') {
+                if (valContent) valContent.style.display = 'none';
+                if (trainContent) trainContent.style.display = 'block';
+                if (valBtn) valBtn.style.background = '#94a3b8';
+                if (trainBtn) trainBtn.style.background = 'var(--train-color)';
+            }
+
+            // Update spectrum and error charts for the new tab
+            updateChartsForCurrentTab();
+        }
+
+        function updateChartsForCurrentTab() {
+            if (!dashboard.currentData) return;
+            const data = dashboard.currentData;
+
+            const valContent = document.getElementById('val-sample-content');
+            const isValTab = valContent && valContent.style.display !== 'none';
+
+            // 현재 탭에 맞는 샘플 + 파장 배열 선택
+            let currentSample = null;
+            let waves = [];
+
+            if (data.samples) {
+                // 신 형식: val/train 분리
+                currentSample = isValTab ? data.samples.val : data.samples.train;
+                waves = data.samples.waves || [];
+            } else if (data.sample) {
+                // 구 형식: 단일 sample
+                currentSample = data.sample;
+                waves = data.sample.waves || [];
+            }
+
+            if (!currentSample || !currentSample.gt_bggr || !currentSample.pred_bggr || waves.length === 0) return;
+
+            const w = waves;
+            const gtR = currentSample.gt_bggr[0][0], gtG = currentSample.gt_bggr[0][1], gtB = currentSample.gt_bggr[1][1];
+            const predR = currentSample.pred_bggr[0][0], predG = currentSample.pred_bggr[0][1], predB = currentSample.pred_bggr[1][1];
+
+            // Spectrum chart
+            if (typeof Chart !== 'undefined' && dashboard.chartInstances.spectrum) {
+                const sc = dashboard.chartInstances.spectrum;
+                sc.data.labels = w.map(v => v.toFixed(0));
+                sc.data.datasets[0].data = gtR;
+                sc.data.datasets[1].data = predR;
+                sc.data.datasets[2].data = gtG;
+                sc.data.datasets[3].data = predG;
+                sc.data.datasets[4].data = gtB;
+                sc.data.datasets[5].data = predB;
+                sc.update('none');
+            }
+
+            // Error chart
+            if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
+                const ec = dashboard.chartInstances.error;
+                ec.data.labels = w.map(v => v.toFixed(0));
+
+                if (currentSample.abs_error_bggr) {
+                    ec.data.datasets[0].data = currentSample.abs_error_bggr[0][0];
+                    ec.data.datasets[1].data = currentSample.abs_error_bggr[0][1];
+                    ec.data.datasets[2].data = currentSample.abs_error_bggr[1][1];
+                } else {
+                    ec.data.datasets[0].data = gtR.map((v, i) => Math.abs(v - predR[i]));
+                    ec.data.datasets[1].data = gtG.map((v, i) => Math.abs(v - predG[i]));
+                    ec.data.datasets[2].data = gtB.map((v, i) => Math.abs(v - predB[i]));
+                }
+                ec.update('none');
+            }
         }
 
         /* ===== PROGRESS BARS ===== */
@@ -782,10 +924,29 @@
             const meanG2 = bggrData[1][0].reduce((a,b) => a+b, 0) / bggrData[1][0].length;
             const meanB  = bggrData[1][1].reduce((a,b) => a+b, 0) / bggrData[1][1].length;
 
-            const rEl  = document.getElementById(prefix + '-r-val');
-            const g1El = document.getElementById(prefix + '-g1-val');
-            const g2El = document.getElementById(prefix + '-g2-val');
-            const bEl  = document.getElementById(prefix + '-b-val');
+            // Handle both old format (prefix='-r-val') and new format (prefix='gt-val')
+            let rEl, g1El, g2El, bEl, grid;
+
+            // Try new format first: prefix includes channel and sample type (e.g., 'gt-val' or 'pred-train')
+            const parts = prefix.split('-');
+            if (parts.length >= 2) {
+                const type = parts[0]; // 'gt' or 'pred'
+                const sample = parts.slice(1).join('-'); // 'val' or 'train'
+                rEl  = document.getElementById(type + '-r-' + sample + '-' + sample);
+                g1El = document.getElementById(type + '-g1-' + sample + '-' + sample);
+                g2El = document.getElementById(type + '-g2-' + sample + '-' + sample);
+                bEl  = document.getElementById(type + '-b-' + sample + '-' + sample);
+                grid = document.getElementById(type + '-bggr-grid-' + sample);
+            }
+
+            // Fallback to old format if new IDs not found
+            if (!rEl) {
+                rEl  = document.getElementById(prefix + '-r-val');
+                g1El = document.getElementById(prefix + '-g1-val');
+                g2El = document.getElementById(prefix + '-g2-val');
+                bEl  = document.getElementById(prefix + '-b-val');
+                grid = document.getElementById(prefix + '-bggr-grid');
+            }
 
             if (rEl)  rEl.textContent  = meanR.toFixed(4);
             if (g1El) g1El.textContent = meanG1.toFixed(4);
@@ -795,7 +956,6 @@
             // Adjust cell opacity based on intensity
             const vals = [Math.abs(meanR), Math.abs(meanG1), Math.abs(meanG2), Math.abs(meanB)];
             const maxV = Math.max(...vals) || 1;
-            const grid = document.getElementById(prefix + '-bggr-grid');
             if (grid) {
                 const cells = grid.querySelectorAll('.bggr-cell');
                 const opacities = vals.map(v => 0.4 + 0.6 * (v / maxV));
@@ -859,6 +1019,15 @@
                 const data = JSON.parse(event.data);
                 dashboard.currentData = data;
                 saveDashboardState(data);
+
+                // 디버깅: 데이터 구조 확인
+                console.log('📊 Dashboard Data Received:', {
+                    hassamples: !!data.samples,
+                    haswaves: data.samples && !!data.samples.waves,
+                    wavesLength: data.samples && data.samples.waves ? data.samples.waves.length : 0,
+                    hasValSample: data.samples && !!data.samples.val,
+                    hasTrainSample: data.samples && !!data.samples.train
+                });
 
                 // Metric cards
                 const ep = data.epoch !== undefined ? data.epoch + 1 : '--';
@@ -925,32 +1094,79 @@
                 }
 
                 // Sample visualizations
-                if (data.sample) {
-                    if (data.sample.input_struct && Array.isArray(data.sample.input_struct)) {
-                        drawImage('canvas-input', data.sample.input_struct, 128);
+                if (data.samples) {
+                    const waves = data.samples.waves || [];
+
+                    // Val sample
+                    const valSample = data.samples.val;
+                    if (valSample) {
+                        if (valSample.input_struct && Array.isArray(valSample.input_struct)) {
+                            drawImage('canvas-input-val', valSample.input_struct, 128);
+                        }
+                        if (valSample.gt_bggr) {
+                            updateBGGR('gt-val', valSample.gt_bggr);
+                        }
+                        if (valSample.pred_bggr) {
+                            updateBGGR('pred-val', valSample.pred_bggr);
+                        }
                     }
 
-                    // BGGR grids: [0,0]=R, [0,1]=G, [1,0]=G, [1,1]=B
-                    if (data.sample.gt_bggr) {
-                        updateBGGR('gt', data.sample.gt_bggr);
-                    }
-                    if (data.sample.pred_bggr) {
-                        updateBGGR('pred', data.sample.pred_bggr);
+                    // Train sample
+                    const trainSample = data.samples.train;
+                    if (trainSample) {
+                        if (trainSample.input_struct && Array.isArray(trainSample.input_struct)) {
+                            drawImage('canvas-input-train', trainSample.input_struct, 128);
+                        }
+                        if (trainSample.gt_bggr) {
+                            updateBGGR('gt-train', trainSample.gt_bggr);
+                        }
+                        if (trainSample.pred_bggr) {
+                            updateBGGR('pred-train', trainSample.pred_bggr);
+                        }
                     }
 
-                    // Spectrum + Error charts
-                    if (data.sample.gt_bggr && data.sample.pred_bggr && data.sample.waves) {
-                        const w = data.sample.waves;
-                        // [0,0]=R, [0,1]=G, [1,1]=B
-                        const gtR = data.sample.gt_bggr[0][0];
-                        const gtG = data.sample.gt_bggr[0][1];
-                        const gtB = data.sample.gt_bggr[1][1];
-                        const predR = data.sample.pred_bggr[0][0];
-                        const predG = data.sample.pred_bggr[0][1];
-                        const predB = data.sample.pred_bggr[1][1];
+                    // Spectrum + Error charts (show current tab sample)
+                    // Check if we're on val or train tab
+                    const valContent = document.getElementById('val-sample-content');
+                    const isValTab = valContent && valContent.style.display !== 'none';
+                    const currentSample = isValTab ? valSample : trainSample;
+
+                    console.log('📈 Chart Update Check:', {
+                        currentTab: isValTab ? 'val' : 'train',
+                        hasSample: !!currentSample,
+                        hasGtBggr: currentSample && !!currentSample.gt_bggr,
+                        hasPredBggr: currentSample && !!currentSample.pred_bggr,
+                        wavesLength: waves.length,
+                        canUpdate: currentSample && currentSample.gt_bggr && currentSample.pred_bggr && waves.length > 0
+                    });
+
+                    if (currentSample && currentSample.gt_bggr && currentSample.pred_bggr && waves.length > 0) {
+                        const w = waves;
+                        // [0,0]=R, [0,1]=G, [1,0]=G, [1,1]=B
+                        const gtR = currentSample.gt_bggr[0][0];
+                        const gtG = currentSample.gt_bggr[0][1];
+                        const gtB = currentSample.gt_bggr[1][1];
+                        const predR = currentSample.pred_bggr[0][0];
+                        const predG = currentSample.pred_bggr[0][1];
+                        const predB = currentSample.pred_bggr[1][1];
+
+                        console.log('📊 Spectrum Chart Data:', {
+                            labelsCount: w.length,
+                            gtRLength: gtR ? gtR.length : 0,
+                            predRLength: predR ? predR.length : 0,
+                            chartsReady: typeof Chart !== 'undefined' && !!dashboard.chartInstances.spectrum
+                        });
 
                         if (typeof Chart !== 'undefined' && dashboard.chartInstances.spectrum) {
                             const sc = dashboard.chartInstances.spectrum;
+                            console.log('✅ Updating spectrum chart...');
+                            console.log('📊 Spectrum data:', {
+                                labelsCount: w.length,
+                                gtRLength: gtR ? gtR.length : 0,
+                                gtRSample: gtR ? gtR.slice(0, 3) : 'null',
+                                predRSample: predR ? predR.slice(0, 3) : 'null'
+                            });
+
                             sc.data.labels = w.map(v => v.toFixed(0));
                             sc.data.datasets[0].data = gtR;   // R GT (dashed)
                             sc.data.datasets[1].data = predR;  // R Pred (solid)
@@ -958,16 +1174,133 @@
                             sc.data.datasets[3].data = predG;  // G Pred
                             sc.data.datasets[4].data = gtB;   // B GT
                             sc.data.datasets[5].data = predB;  // B Pred
-                            sc.update();
+
+                            // Force chart redraw
+                            sc.data.datasets.forEach(ds => {
+                                if (!ds.data || ds.data.length === 0) {
+                                    console.warn('⚠️ Empty dataset:', ds.label);
+                                }
+                            });
+
+                            sc.update('none');  // Update without animation
+                            console.log('✅ Spectrum chart updated successfully');
+                        } else {
+                            console.warn('⚠️ Spectrum chart not ready:', {
+                                chartLoaded: typeof Chart !== 'undefined',
+                                chartInstanceExists: !!dashboard.chartInstances.spectrum
+                            });
                         }
 
+                        // Absolute error chart
+                        console.log('📊 Error Chart Check:', {
+                            hasAbsErrorBggr: !!currentSample.abs_error_bggr,
+                            chartsReady: typeof Chart !== 'undefined' && !!dashboard.chartInstances.error
+                        });
+
+                        if (currentSample.abs_error_bggr) {
+                            const errR = currentSample.abs_error_bggr[0][0];
+                            const errG = currentSample.abs_error_bggr[0][1];
+                            const errB = currentSample.abs_error_bggr[1][1];
+
+                            console.log('✅ Using abs_error_bggr data');
+
+                            if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
+                                const ec = dashboard.chartInstances.error;
+                                console.log('✅ Updating error chart with abs_error_bggr...');
+                                console.log('📊 Error data:', {
+                                    labelsCount: w.length,
+                                    errRLength: errR ? errR.length : 0,
+                                    errRSample: errR ? errR.slice(0, 3) : 'null'
+                                });
+
+                                ec.data.labels = w.map(v => v.toFixed(0));
+                                ec.data.datasets[0].data = errR;
+                                ec.data.datasets[1].data = errG;
+                                ec.data.datasets[2].data = errB;
+
+                                // Force chart redraw
+                                ec.data.datasets.forEach(ds => {
+                                    if (!ds.data || ds.data.length === 0) {
+                                        console.warn('⚠️ Empty error dataset:', ds.label);
+                                    }
+                                });
+
+                                ec.update('none');  // Update without animation
+                                console.log('✅ Error chart updated successfully');
+                            }
+                        } else {
+                            console.log('⚠️ Using fallback error calculation (abs_error_bggr not provided)');
+                            // Fallback: calculate error as |pred - gt| if abs_error_bggr not available
+                            if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
+                                const ec = dashboard.chartInstances.error;
+                                const calcErrR = gtR.map((v, i) => Math.abs(v - predR[i]));
+                                const calcErrG = gtG.map((v, i) => Math.abs(v - predG[i]));
+                                const calcErrB = gtB.map((v, i) => Math.abs(v - predB[i]));
+
+                                console.log('✅ Updating error chart with calculated errors...');
+                                console.log('📊 Calculated error data:', {
+                                    calcErrRLength: calcErrR.length,
+                                    calcErrRSample: calcErrR.slice(0, 3)
+                                });
+
+                                ec.data.labels = w.map(v => v.toFixed(0));
+                                ec.data.datasets[0].data = calcErrR;
+                                ec.data.datasets[1].data = calcErrG;
+                                ec.data.datasets[2].data = calcErrB;
+
+                                // Force chart redraw
+                                ec.data.datasets.forEach(ds => {
+                                    if (!ds.data || ds.data.length === 0) {
+                                        console.warn('⚠️ Empty calculated error dataset:', ds.label);
+                                    }
+                                });
+
+                                ec.update('none');  // Update without animation
+                                console.log('✅ Error chart updated successfully (fallback)');
+                            }
+                        }
+                    }
+                } else if (data.sample) {
+                    // Backward compatibility: 현재 실행 중인 학습이 구 형식 사용
+                    const s = data.sample;
+
+                    // Input structure
+                    if (s.input_struct) {
+                        const flat = Array.isArray(s.input_struct[0]) ? s.input_struct.flat() : s.input_struct;
+                        drawImage('canvas-input-val', flat, 128);
+                    }
+
+                    // BGGR grids
+                    if (s.gt_bggr)   updateBGGR('gt-val', s.gt_bggr);
+                    if (s.pred_bggr) updateBGGR('pred-val', s.pred_bggr);
+
+                    // Spectrum + Error charts (구 형식: waves가 sample 안에 있음)
+                    const w = s.waves || [];
+                    if (s.gt_bggr && s.pred_bggr && w.length > 0) {
+                        const gtR = s.gt_bggr[0][0], gtG = s.gt_bggr[0][1], gtB = s.gt_bggr[1][1];
+                        const predR = s.pred_bggr[0][0], predG = s.pred_bggr[0][1], predB = s.pred_bggr[1][1];
+
+                        // Spectrum chart
+                        if (typeof Chart !== 'undefined' && dashboard.chartInstances.spectrum) {
+                            const sc = dashboard.chartInstances.spectrum;
+                            sc.data.labels = w.map(v => v.toFixed(0));
+                            sc.data.datasets[0].data = gtR;
+                            sc.data.datasets[1].data = predR;
+                            sc.data.datasets[2].data = gtG;
+                            sc.data.datasets[3].data = predG;
+                            sc.data.datasets[4].data = gtB;
+                            sc.data.datasets[5].data = predB;
+                            sc.update('none');
+                        }
+
+                        // Error chart: |pred - gt|
                         if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
                             const ec = dashboard.chartInstances.error;
                             ec.data.labels = w.map(v => v.toFixed(0));
                             ec.data.datasets[0].data = gtR.map((v, i) => Math.abs(v - predR[i]));
                             ec.data.datasets[1].data = gtG.map((v, i) => Math.abs(v - predG[i]));
                             ec.data.datasets[2].data = gtB.map((v, i) => Math.abs(v - predB[i]));
-                            ec.update();
+                            ec.update('none');
                         }
                     }
                 }
@@ -1019,10 +1352,18 @@
 
         /* ===== INIT ===== */
         window.addEventListener('load', () => {
+            console.log('🚀 대시보드 초기화 시작...');
             const saved = loadDashboardState();
-            if (saved) handleMessage({ data: JSON.stringify(saved) });
+            if (saved) {
+                console.log('📂 저장된 상태 로드');
+                handleMessage({ data: JSON.stringify(saved) });
+            }
+            console.log('📊 차트 초기화...');
             initCharts();
+            console.log('✅ 차트 초기화 완료');
+            console.log('📡 WebSocket 연결...');
             connectWebSocket();
+            console.log('🎉 대시보드 초기화 완료!');
         });
     </script>
 </body>

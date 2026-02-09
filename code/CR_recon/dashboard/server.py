@@ -41,7 +41,11 @@ class DashboardServer:
             "best_val": float("inf"),
             "train_losses": [],
             "val_losses": [],
-            "sample": None,
+            "samples": {
+                "val": None,
+                "train": None,
+                "waves": []
+            },
             "progress": {
                 "stage": "",
                 "epoch": 0,
@@ -269,7 +273,11 @@ class DashboardServer:
             "best_val": float("inf"),
             "train_losses": [],
             "val_losses": [],
-            "sample": None,
+            "samples": {
+                "val": None,
+                "train": None,
+                "waves": []
+            },
             "progress": {
                 "stage": "",
                 "epoch": 0,
