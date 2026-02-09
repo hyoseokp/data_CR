@@ -267,15 +267,18 @@ class Trainer:
             "val_losses": self.val_losses,
         }
 
+        # Always write "last" so `--resume outputs/<model>_last.pt` truly resumes the latest state,
+        # even when the current epoch also becomes the best checkpoint.
+        torch.save(ckpt, self.ckpt_last)
+
         if is_best:
             torch.save(ckpt, self.ckpt_best)
             self.log(f"[CKPT] saved best to {self.ckpt_best}", also_console=True)
-        else:
-            torch.save(ckpt, self.ckpt_last)
-            if periodic:
-                ckpt_periodic = self.output_dir / f"{self.cfg['model']['name']}_epoch_{self.current_epoch:04d}.pt"
-                torch.save(ckpt, ckpt_periodic)
-                self.log(f"[CKPT] saved periodic to {ckpt_periodic}", also_console=True)
+
+        if periodic:
+            ckpt_periodic = self.output_dir / f"{self.cfg['model']['name']}_epoch_{self.current_epoch:04d}.pt"
+            torch.save(ckpt, ckpt_periodic)
+            self.log(f"[CKPT] saved periodic to {ckpt_periodic}", also_console=True)
 
     def load_checkpoint(self, ckpt_path: str):
         """체크포인트 로드."""
