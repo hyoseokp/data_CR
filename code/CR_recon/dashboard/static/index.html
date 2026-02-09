@@ -962,19 +962,28 @@
             lossParams = lossParams || {};
 
             if (modelName === 'cnn_xattn') {
+                const dc = (modelParams.cnn_dropout ?? '--');
+                const dt = (modelParams.tr_dropout ?? '--');
+                const dh = (modelParams.head_dropout ?? '--');
+                const ucp = (modelParams.use_circular_padding ?? '--');
                 mHTML = '<div style="margin-bottom:8px"><strong>MetaSpec_CNNXAttn</strong></div>' +
                     '<div style="font-size:12px;line-height:1.8">' +
                     '<div>Input: $x \\in \\mathbb{R}^{1 \\times 128 \\times 128}$ &rarr; Output: $y \\in \\mathbb{R}^{2 \\times 2 \\times ' + modelParams.out_len + '}$</div>' +
                     '<div style="margin-top:4px">CNN (5 stages) + Transformer Decoder &nbsp;|&nbsp; ' +
                     '<span style="font-family:monospace;font-size:11px">d=' + modelParams.d_model + ', h=' + modelParams.nhead +
-                    ', L=' + modelParams.dec_layers + ', drop=' + modelParams.cnn_dropout + '/' + modelParams.tr_dropout + '</span></div></div>';
+                    ', L=' + modelParams.dec_layers +
+                    ', drop_cnn=' + dc + ', drop_tr=' + dt + ', drop_head=' + dh +
+                    ', circular_pad=' + ucp + '</span></div></div>';
             } else if (modelName === 'cnn_gru') {
+                const dc = (modelParams.cnn_dropout ?? '--');
+                const dh = (modelParams.head_dropout ?? null);
                 mHTML = '<div style="margin-bottom:8px"><strong>MetaSpec_CNNGRU</strong></div>' +
                     '<div style="font-size:12px;line-height:1.8">' +
                     '<div>Input: $x \\in \\mathbb{R}^{1 \\times 128 \\times 128}$ &rarr; Output: $y \\in \\mathbb{R}^{2 \\times 2 \\times ' + modelParams.out_len + '}$</div>' +
                     '<div style="margin-top:4px">CNN + GRU &nbsp;|&nbsp; ' +
                     '<span style="font-family:monospace;font-size:11px">d=' + modelParams.d_model + ', gru_L=' + modelParams.gru_layers +
-                    ', drop=' + modelParams.cnn_dropout + '</span></div></div>';
+                    (dh === null ? (', drop_cnn=' + dc) : (', drop_cnn=' + dc + ', drop_head=' + dh)) +
+                    '</span></div></div>';
             }
 
             if (lossName === 'mse_pearson') {
