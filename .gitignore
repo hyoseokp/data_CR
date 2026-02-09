@@ -40,6 +40,10 @@ data_CR-main/
 *.pt
 *.pth
 
+# Checkpoints (tracked via Git LFS)
+!code/CR_recon/checkpoints/
+!code/CR_recon/checkpoints/*.pt
+
 # Notebooks
 .ipynb_checkpoints/
 *.ipynb
