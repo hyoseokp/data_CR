@@ -163,7 +163,7 @@ class Trainer:
         comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
         comp_count = 0
         corr_min = {"dp_norm_min": float("inf"), "dt_norm_min": float("inf"), "denom_min": float("inf"), "r_min": float("inf")}
-        corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0}
+        corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0, "shape_valid_frac": 0.0}
         clamp_sum = {"frac_clamped": 0.0, "frac_low": 0.0, "frac_high": 0.0, "total_min": 0.0, "total_max": 0.0, "total_mean": 0.0}
         clamp_count = 0
 
@@ -271,7 +271,7 @@ class Trainer:
             self.log(
                 "[LOSS_DIAG][train] "
                 f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
-                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} "
+                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
                 f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e} "
                 f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
                 f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}",
@@ -287,7 +287,7 @@ class Trainer:
         comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
         comp_count = 0
         corr_min = {"dp_norm_min": float("inf"), "dt_norm_min": float("inf"), "denom_min": float("inf"), "r_min": float("inf")}
-        corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0}
+        corr_sum = {"r_mean": 0.0, "dp_norm_mean": 0.0, "dt_norm_mean": 0.0, "r_finite_frac": 0.0, "shape_valid_frac": 0.0}
         clamp_sum = {"frac_clamped": 0.0, "frac_low": 0.0, "frac_high": 0.0, "total_min": 0.0, "total_max": 0.0, "total_mean": 0.0}
         clamp_count = 0
 
@@ -360,7 +360,7 @@ class Trainer:
             self.log(
                 "[LOSS_DIAG][val] "
                 f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
-                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} "
+                f"r_mean={corr['r_mean']:.3e} r_min={corr_min['r_min']:.3e} r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
                 f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e} "
                 f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
                 f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}",

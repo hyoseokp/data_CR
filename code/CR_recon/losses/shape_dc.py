@@ -54,6 +54,9 @@ def get_abs_dc_shape_loss(
     w_shape: float = 0.2,
     beta: float = 0.02,
     blue_weight: float = 1.0,
+    corr_eps: float = 1e-8,
+    corr_norm_floor: float = 1e-3,
+    corr_denom_floor: float = 1e-4,
 ) -> callable:
     """
     Factory function.
@@ -64,6 +67,9 @@ def get_abs_dc_shape_loss(
       w_shape: weight for shape loss (Pearson on first derivative over wavelength)
       beta: SmoothL1 beta parameter
       blue_weight: weight multiplier for Blue channel [1,1]
+      corr_eps: epsilon added to correlation denominator
+      corr_norm_floor: if either norm is below this, skip shape term for that sample
+      corr_denom_floor: clamp denominator to at least this to avoid ill-conditioned division
     """
     class AbsDCShapeLoss(nn.Module):
         def __init__(self):
@@ -108,14 +114,25 @@ def get_abs_dc_shape_loss(
                 dp_flat = dp.reshape(B * 4, Lm1)
                 dt_flat = dt.reshape(B * 4, Lm1)
 
-                eps = 1e-8
                 p = dp_flat - dp_flat.mean(dim=-1, keepdim=True)
                 t = dt_flat - dt_flat.mean(dim=-1, keepdim=True)
                 p_norm = p.norm(dim=-1)
                 t_norm = t.norm(dim=-1)
-                denom = p_norm * t_norm + eps
+                denom_raw = p_norm * t_norm
+                valid = (p_norm > corr_norm_floor) & (t_norm > corr_norm_floor)
+                denom = torch.clamp(denom_raw, min=corr_denom_floor) + corr_eps
+
                 r = (p * t).sum(dim=-1) / denom
-                l_shape = (1.0 - r).mean()
+                r = r.clamp(-1.0, 1.0)
+
+                if valid.any():
+                    r_valid = r[valid]
+                    l_shape = (1.0 - r_valid).mean()
+                    valid_frac = float(valid.float().mean().item())
+                else:
+                    # If derivatives are too flat to define a stable correlation, don't use shape loss.
+                    l_shape = pred.new_tensor(0.0)
+                    valid_frac = 0.0
 
                 with torch.no_grad():
                     self._last_stats = {
@@ -129,6 +146,7 @@ def get_abs_dc_shape_loss(
                         "dt_norm_mean": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "mean").item()),
                         "dt_norm_min": float(_finite_reduce(dt_flat.detach().norm(dim=-1), "min").item()),
                         "denom_min": float(_finite_reduce(denom.detach(), "min").item()),
+                        "shape_valid_frac": float(valid_frac),
                         "r_finite_frac": float(torch.isfinite(r.detach()).float().mean().item()),
                     }
             else:
@@ -145,6 +163,7 @@ def get_abs_dc_shape_loss(
                         "dt_norm_mean": float("nan"),
                         "dt_norm_min": float("nan"),
                         "denom_min": float("nan"),
+                        "shape_valid_frac": float("nan"),
                         "r_finite_frac": float("nan"),
                     }
 

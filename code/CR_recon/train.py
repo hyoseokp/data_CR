@@ -403,26 +403,65 @@ def main():
         print("\n[ERROR] 데이터 정제에 실패했습니다. 학습을 시작할 수 없습니다.")
         sys.exit(1)
 
-    # Best checkpoint 확인 및 사용자 선택
-    init_weights = args.init_weights
-    if not args.resume and not args.init_weights:
-        best_ckpt = Path(cfg_dir) / "outputs" / f"{cfg['model']['name']}_best.pt"
-        if best_ckpt.exists():
-            print(f"\n[INFO] 기존 best checkpoint 발견: {best_ckpt}")
-            try:
-                if not sys.stdin or not sys.stdin.isatty():
-                    raise EOFError
-                choice = input("[선택] 기존 best 파라미터를 불러올까요? (y/n): ").strip().lower()
-            except EOFError:
-                choice = "n"
-                print("[INFO] No stdin available; training from scratch.")
-                print("[INFO] To initialize from a checkpoint, pass --init-weights <path>.")
+    # Checkpoints
+    outputs_dir = Path(cfg_dir) / "outputs"
+    best_ckpt = outputs_dir / f"{cfg['model']['name']}_best.pt"
+    last_ckpt = outputs_dir / f"{cfg['model']['name']}_last.pt"
 
-            if choice == 'y':
-                init_weights = str(best_ckpt)
-                print(f"[INFO] best 파라미터를 불러와서 학습합니다.")
+    # Safer default: if checkpoints exist and user didn't specify intent, prefer RESUME over SCRATCH.
+    resume_from = args.resume
+    init_weights = args.init_weights
+    if not resume_from and not init_weights:
+        have_best = best_ckpt.exists()
+        have_last = last_ckpt.exists()
+
+        if have_best or have_last:
+            print("\n[INFO] 기존 checkpoint 발견:")
+            if have_last:
+                print(f"  - last: {last_ckpt}")
+            if have_best:
+                print(f"  - best: {best_ckpt}")
+
+            # Non-interactive: don't accidentally start from scratch and overwrite checkpoints.
+            if (not sys.stdin) or (not sys.stdin.isatty()):
+                if have_last:
+                    resume_from = str(last_ckpt)
+                    print("[INFO] No stdin available; auto-resume from last checkpoint.")
+                else:
+                    resume_from = str(best_ckpt)
+                    print("[INFO] No stdin available; auto-resume from best checkpoint.")
             else:
-                print("[INFO] 처음부터 새로 학습합니다.")
+                print("\n[선택] 무엇을 할까요?")
+                print("  1) Resume from last (권장, optimizer/scheduler/epoch 복원)")
+                print("  2) Resume from best (optimizer/scheduler/epoch 복원)")
+                print("  3) Init weights from best (epoch 0부터 새로, optimizer 초기화)")
+                print("  4) Train from scratch (outputs를 archive로 백업 후 새로 시작)")
+                choice = input("번호 입력 [1-4] (기본=1): ").strip() or "1"
+
+                if choice == "1" and have_last:
+                    resume_from = str(last_ckpt)
+                elif choice == "2" and have_best:
+                    resume_from = str(best_ckpt)
+                elif choice == "3" and have_best:
+                    init_weights = str(best_ckpt)
+                elif choice == "4":
+                    # Archive existing outputs to avoid accidental overwrite.
+                    import shutil
+                    ts = time.strftime("%Y%m%d_%H%M%S")
+                    archive_dir = outputs_dir / "archive" / ts
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    for p in [best_ckpt, last_ckpt, outputs_dir / "train_log.txt"]:
+                        if p.exists():
+                            shutil.move(str(p), str(archive_dir / p.name))
+                    print(f"[INFO] Archived previous outputs to: {archive_dir}")
+                else:
+                    # Fallback: safest is resume last if present.
+                    if have_last:
+                        resume_from = str(last_ckpt)
+                        print("[INFO] Invalid choice; fallback to resume last.")
+                    elif have_best:
+                        resume_from = str(best_ckpt)
+                        print("[INFO] Invalid choice; fallback to resume best.")
 
     print("\n" + "=" * 80)
     print("학습 시작")
@@ -448,7 +487,7 @@ def main():
     print("=" * 80 + "\n")
 
     # 학습 실행
-    trainer.train(resume_from=args.resume, init_weights=init_weights)
+    trainer.train(resume_from=resume_from, init_weights=init_weights)
 
 
 if __name__ == "__main__":
