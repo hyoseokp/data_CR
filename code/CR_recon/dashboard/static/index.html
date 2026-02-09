@@ -850,6 +850,76 @@
             return v.toExponential(2);
         }
 
+        /* ===== SPECTRUM SMOOTHING (PCHIP) ===== */
+        function isFiniteNumber(v) {
+            return typeof v === 'number' && Number.isFinite(v);
+        }
+
+        function buildDenseWaveGrid() {
+            // Match project convention (301 points: 400..700)
+            const xs = new Array(301);
+            for (let i = 0; i < 301; i++) xs[i] = 400 + i;
+            return xs;
+        }
+
+        function pchipInterpolate(xs, ys, xq) {
+            // Piecewise Cubic Hermite Interpolating Polynomial (Fritsch-Carlson tangents).
+            const n = xs.length;
+            if (n < 2 || ys.length !== n || xq.length < 1) return null;
+
+            for (let i = 0; i < n; i++) {
+                if (!isFiniteNumber(xs[i]) || !isFiniteNumber(ys[i])) return null;
+                if (i > 0 && !(xs[i] > xs[i - 1])) return null;
+            }
+
+            const d = new Array(n - 1);
+            const h = new Array(n - 1);
+            for (let i = 0; i < n - 1; i++) {
+                h[i] = xs[i + 1] - xs[i];
+                d[i] = (ys[i + 1] - ys[i]) / h[i];
+            }
+
+            const m = new Array(n);
+            m[0] = d[0];
+            m[n - 1] = d[n - 2];
+            for (let i = 1; i < n - 1; i++) {
+                const d0 = d[i - 1];
+                const d1 = d[i];
+                if (d0 === 0 || d1 === 0 || (d0 > 0) !== (d1 > 0)) {
+                    m[i] = 0;
+                    continue;
+                }
+                const h0 = h[i - 1];
+                const h1 = h[i];
+                const w1 = 2 * h1 + h0;
+                const w2 = h1 + 2 * h0;
+                m[i] = (w1 + w2) / (w1 / d0 + w2 / d1);
+            }
+
+            const yq = new Array(xq.length);
+            let j = 0;
+            for (let qi = 0; qi < xq.length; qi++) {
+                const x = xq[qi];
+                if (!isFiniteNumber(x)) { yq[qi] = null; continue; }
+                if (x <= xs[0]) { yq[qi] = ys[0]; continue; }
+                if (x >= xs[n - 1]) { yq[qi] = ys[n - 1]; continue; }
+                while (j < n - 2 && x > xs[j + 1]) j++;
+
+                const x0 = xs[j], x1 = xs[j + 1];
+                const y0 = ys[j], y1 = ys[j + 1];
+                const t = (x - x0) / (x1 - x0);
+                const hh = (x1 - x0);
+
+                const h00 = (2 * t * t * t - 3 * t * t + 1);
+                const h10 = (t * t * t - 2 * t * t + t);
+                const h01 = (-2 * t * t * t + 3 * t * t);
+                const h11 = (t * t * t - t * t);
+
+                yq[qi] = h00 * y0 + h10 * hh * m[j] + h01 * y1 + h11 * hh * m[j + 1];
+            }
+            return yq;
+        }
+
         /* ===== PROGRESS BARS ===== */
         function updateProgressBars(data) {
             const p = data.progress;
@@ -1127,13 +1197,32 @@
 
                         if (typeof Chart !== 'undefined' && dashboard.chartInstances.spectrum) {
                             const sc = dashboard.chartInstances.spectrum;
-                            sc.data.labels = w.map(v => v.toFixed(0));
-                            sc.data.datasets[0].data = gtR;   // R GT (dashed)
-                            sc.data.datasets[1].data = predR;  // R Pred (solid)
-                            sc.data.datasets[2].data = gtG;   // G GT
-                            sc.data.datasets[3].data = predG;  // G Pred
-                            sc.data.datasets[4].data = gtB;   // B GT
-                            sc.data.datasets[5].data = predB;  // B Pred
+                            const denseW = buildDenseWaveGrid();
+                            const smGtR = pchipInterpolate(w, gtR, denseW);
+                            const smPrR = pchipInterpolate(w, predR, denseW);
+                            const smGtG = pchipInterpolate(w, gtG, denseW);
+                            const smPrG = pchipInterpolate(w, predG, denseW);
+                            const smGtB = pchipInterpolate(w, gtB, denseW);
+                            const smPrB = pchipInterpolate(w, predB, denseW);
+
+                            const canSmooth = smGtR && smPrR && smGtG && smPrG && smGtB && smPrB;
+                            if (canSmooth) {
+                                sc.data.labels = denseW.map(v => String(v));
+                                sc.data.datasets[0].data = smGtR;
+                                sc.data.datasets[1].data = smPrR;
+                                sc.data.datasets[2].data = smGtG;
+                                sc.data.datasets[3].data = smPrG;
+                                sc.data.datasets[4].data = smGtB;
+                                sc.data.datasets[5].data = smPrB;
+                            } else {
+                                sc.data.labels = w.map(v => v.toFixed(0));
+                                sc.data.datasets[0].data = gtR;
+                                sc.data.datasets[1].data = predR;
+                                sc.data.datasets[2].data = gtG;
+                                sc.data.datasets[3].data = predG;
+                                sc.data.datasets[4].data = gtB;
+                                sc.data.datasets[5].data = predB;
+                            }
                             sc.update();
                         }
 
