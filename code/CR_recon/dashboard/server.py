@@ -5,6 +5,7 @@ Dashboard Server: FastAPI + WebSocket
 import asyncio
 import json
 import logging
+import math
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -15,6 +16,24 @@ from fastapi.responses import FileResponse
 import uvicorn
 
 logger = logging.getLogger(__name__)
+
+def _json_sanitize(obj: Any) -> Any:
+    """
+    Make payload safe for browser-side JSON.parse:
+    - Replace NaN/Inf floats with None (-> null)
+    - Recurse through dict/list/tuple
+    """
+    if obj is None:
+        return None
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, (int, str, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _json_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_sanitize(v) for v in obj]
+    return str(obj)
 
 
 class DashboardServer:
@@ -80,7 +99,7 @@ class DashboardServer:
 
             try:
                 # 연결 직후 현재 상태 전송 (이전 데이터 복원)
-                await websocket.send_text(json.dumps(self.state))
+                await websocket.send_text(json.dumps(_json_sanitize(self.state), allow_nan=False))
 
                 # 연결 유지 (클라이언트로부터 메시지 대기)
                 while True:
@@ -106,7 +125,7 @@ class DashboardServer:
         if not self.connected_clients:
             return
 
-        message = json.dumps(data)
+        message = json.dumps(_json_sanitize(data), allow_nan=False)
         disconnected = []
 
         async with self.client_lock:
