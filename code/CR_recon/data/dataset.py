@@ -11,14 +11,13 @@ from pathlib import Path
 
 class CRDataset(Dataset):
     """
-    128x128 구조 이미지 → Bayer 2x2 스펙트럼 (30 bins) 예측 데이터셋
+    128x128 구조 이미지 → Bayer 2x2 스펙트럼 (301 bins) 예측 데이터셋
 
     데이터 정제 파이프라인:
     1. 원본: struct (N, 1, 128, 128), spectra (N, 3, 301)
     2. 필터링: 유효한 샘플만 선택 (spectra ≠ 0)
-    3. Bayer 변환: spectra (M, 3, 301) → (M, 2, 2, 30)
+    3. Bayer 변환: spectra (M, 3, 301) → (M, 2, 2, out_len)
        - [0,0]=R, [0,1]=G, [1,0]=G, [1,1]=B
-       - 동시에 301 bin → 30 bin 다운샘플
     4. 180도 증강: Bayer의 R과 B 위치 교환 (augment=True일 때)
     """
 

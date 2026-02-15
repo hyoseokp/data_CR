@@ -7,32 +7,36 @@ data:
   spectra_files:
     - "../../data_CR-main/spectra_latest_0.npy"
     - "../../data_CR-main/spectra_latest_1.npy"
-  out_len: 30
+  out_len: 301
   map_to_pm1: true
   augment_180: true
   train_ratio: 0.95
-  batch_size: 1024
+  batch_size: 512
   num_workers: 0
 
 model:
   name: "cnn_xattn"
   params:
-    out_len: 30
+    out_len: 301
     d_model: 256
     nhead: 8
     dec_layers: 4
-    cnn_dropout: 0.05
-    tr_dropout: 0.1
-    head_dropout: 0.2
+    cnn_dropout: 0.02
+    tr_dropout: 0.03
+    head_dropout: 0.05
     use_circular_padding: true
 
 loss:
-  name: "mse_corr_l1"
+  name: "multiscale_spectral"
   params:
-    w_mse: 1.0
-    w_corr: 0.2
-    w_l1: 0.1
+    w_abs: 1.0
+    w_corr: 0.3
+    w_grad1: 0.5
+    w_grad2: 0.2
+    w_fft: 0.1
     blue_weight: 2.0
+    beta: 0.02
+    fft_start_ratio: 0.5
 
 training:
   epochs: 500

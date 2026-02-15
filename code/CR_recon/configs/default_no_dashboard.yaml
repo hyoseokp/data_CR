@@ -11,7 +11,7 @@ data:
   spectra_files:
     - "../../data_CR-main/spectra_latest_0.npy"
     - "../../data_CR-main/spectra_latest_1.npy"
-  out_len: 30
+  out_len: 301
   map_to_pm1: true
   augment_180: true
   train_ratio: 0.95
@@ -21,7 +21,7 @@ data:
 model:
   name: "cnn_xattn"
   params:
-    out_len: 30
+    out_len: 301
     d_model: 256
     nhead: 8
     dec_layers: 4

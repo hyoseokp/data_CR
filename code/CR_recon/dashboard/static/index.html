@@ -384,6 +384,161 @@
             overflow-x: auto;
         }
 
+        /* ===== TRAINING CONTROL ===== */
+        .train-control {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 12px 20px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow);
+        }
+        .train-control-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .train-config-select {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 200px;
+        }
+        .config-dropdown {
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 13px;
+            background: var(--bg);
+            color: var(--text);
+            flex: 1;
+            max-width: 300px;
+            cursor: pointer;
+        }
+        .config-dropdown:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .train-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .train-btn {
+            padding: 8px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.3px;
+            transition: all 0.15s ease;
+        }
+        .train-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .train-btn-start {
+            background: var(--accent);
+            color: white;
+        }
+        .train-btn-start:hover:not(:disabled) {
+            background: #4f46e5;
+        }
+        .train-btn-resume {
+            background: var(--green);
+            color: white;
+        }
+        .train-btn-resume:hover:not(:disabled) {
+            background: #16a34a;
+        }
+        .train-btn-stop {
+            background: var(--val-color);
+            color: white;
+        }
+        .train-btn-stop:hover:not(:disabled) {
+            background: #dc2626;
+        }
+        .train-status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        .train-state-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .train-state-dot.idle { background: var(--text-muted); }
+        .train-state-dot.starting { background: #f59e0b; animation: pulse 1s infinite; }
+        .train-state-dot.running { background: var(--green); animation: pulse 1.5s infinite; }
+        .train-state-dot.completed { background: var(--accent); }
+        .train-state-dot.failed { background: var(--val-color); }
+        .train-state-dot.stopping { background: #f59e0b; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .train-error-bar {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            color: #991b1b;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .train-error-dismiss {
+            background: none;
+            border: 1px solid #fca5a5;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            color: #991b1b;
+        }
+        .train-btn-preprocess {
+            background: #0ea5e9;
+            color: white;
+        }
+        .train-btn-preprocess:hover:not(:disabled) {
+            background: #0284c7;
+        }
+        .preprocess-status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .preprocess-state-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+        .preprocess-state-dot.idle { background: var(--text-muted); }
+        .preprocess-state-dot.running { background: #0ea5e9; animation: pulse 1s infinite; }
+        .preprocess-state-dot.completed { background: var(--green); }
+        .preprocess-state-dot.failed { background: var(--val-color); }
+        .preprocess-msg {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: 4px;
+        }
+        .separator-line {
+            width: 1px;
+            height: 28px;
+            background: var(--border);
+            margin: 0 4px;
+        }
+
         /* ===== RESPONSIVE ===== */
         @media (max-width: 1100px) {
             .metrics-row { grid-template-columns: repeat(3, 1fr); }
@@ -419,6 +574,48 @@
                 <span class="status-dot off" id="status-dot"></span>
                 Disconnected
             </div>
+        </div>
+    </div>
+
+    <!-- ===== TRAINING CONTROL (standalone mode only) ===== -->
+    <div id="train-control" class="train-control" style="display:none;">
+        <div class="train-control-row">
+            <div class="train-config-select">
+                <span class="seg-label">Config</span>
+                <select id="config-select" class="config-dropdown">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+            <div class="train-actions">
+                <button id="btn-preprocess" class="train-btn train-btn-preprocess" type="button">
+                    Preprocess
+                </button>
+                <div class="separator-line"></div>
+                <button id="btn-train" class="train-btn train-btn-start" type="button">
+                    Train
+                </button>
+                <button id="btn-resume" class="train-btn train-btn-resume" type="button" style="display:none;">
+                    Resume
+                </button>
+                <button id="btn-stop" class="train-btn train-btn-stop" type="button" style="display:none;">
+                    Stop
+                </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;">
+                <div class="preprocess-status-badge" id="preprocess-badge">
+                    <span class="preprocess-state-dot" id="preprocess-state-dot"></span>
+                    <span id="preprocess-state-text">Data</span>
+                    <span class="preprocess-msg" id="preprocess-msg"></span>
+                </div>
+                <div class="train-status-badge">
+                    <span class="train-state-dot" id="train-state-dot"></span>
+                    <span id="train-state-text">Idle</span>
+                </div>
+            </div>
+        </div>
+        <div id="train-error-bar" class="train-error-bar" style="display:none;">
+            <span id="train-error-msg"></span>
+            <button class="train-error-dismiss" id="btn-dismiss-error" type="button">Dismiss</button>
         </div>
     </div>
 
@@ -1108,6 +1305,14 @@
                 // Progress
                 if (data.progress) updateProgressBars(data);
 
+                // Training control state (standalone mode)
+                if (data.training_control && isStandaloneMode) {
+                    updateTrainingUI(data.training_control);
+                }
+                if (data.preprocess_control && isStandaloneMode) {
+                    updatePreprocessUI(data.preprocess_control);
+                }
+
                 // Model info (once)
                 if (data.model_name && data.loss_name) {
                     const changed =
@@ -1176,6 +1381,311 @@
             }
         }
 
+        /* ===== TRAINING CONTROL (standalone mode) ===== */
+        let isStandaloneMode = false;
+
+        async function checkStandaloneMode() {
+            try {
+                const resp = await fetch('/api/standalone');
+                const data = await resp.json();
+                isStandaloneMode = data.standalone;
+                if (isStandaloneMode) {
+                    document.getElementById('train-control').style.display = 'block';
+                    loadConfigs();
+                    pollTrainingStatus();
+                    // 초기 전처리 상태 로드
+                    try {
+                        const pResp = await fetch('/api/preprocess/status');
+                        const pData = await pResp.json();
+                        updatePreprocessUI(pData);
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                console.warn('Failed to check standalone mode:', e);
+            }
+        }
+
+        async function loadConfigs() {
+            try {
+                const resp = await fetch('/api/train/configs');
+                const data = await resp.json();
+                const select = document.getElementById('config-select');
+                select.innerHTML = '';
+                if (data.configs && data.configs.length > 0) {
+                    data.configs.forEach(function(c) {
+                        const opt = document.createElement('option');
+                        opt.value = c.path;
+                        opt.textContent = c.filename;
+                        select.appendChild(opt);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">No configs found</option>';
+                }
+                // Config 로드 후 체크포인트 정보도 확인
+                checkCheckpoint();
+            } catch (e) {
+                console.warn('Failed to load configs:', e);
+            }
+        }
+
+        // 체크포인트 정보 캐시
+        var lastCheckpointInfo = null;
+
+        async function checkCheckpoint() {
+            const configPath = document.getElementById('config-select').value;
+            if (!configPath) {
+                lastCheckpointInfo = null;
+                updateResumeButton();
+                return;
+            }
+            try {
+                const resp = await fetch('/api/train/checkpoint?config_path=' + encodeURIComponent(configPath));
+                lastCheckpointInfo = await resp.json();
+            } catch (e) {
+                lastCheckpointInfo = null;
+            }
+            updateResumeButton();
+        }
+
+        function updateResumeButton() {
+            var btnResume = document.getElementById('btn-resume');
+            if (!btnResume) return;
+            var info = lastCheckpointInfo;
+            if (info && info.has_checkpoint && !info.is_completed) {
+                btnResume.style.display = 'inline-block';
+                btnResume.textContent = 'Resume (' + info.epoch + '/' + info.total_epochs + ')';
+                btnResume.disabled = false;
+            } else if (info && info.has_checkpoint && info.is_completed) {
+                btnResume.style.display = 'none';
+            } else {
+                btnResume.style.display = 'none';
+            }
+        }
+
+        async function startTraining() {
+            const configPath = document.getElementById('config-select').value;
+            if (!configPath) {
+                showTrainError('Please select a config file');
+                return;
+            }
+            var btn = document.getElementById('btn-train');
+            btn.disabled = true;
+            try {
+                const resp = await fetch('/api/train/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        config_path: configPath,
+                        skip_data_update: true
+                    })
+                });
+                const data = await resp.json();
+                if (!data.ok) {
+                    showTrainError(data.error || 'Failed to start training');
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                showTrainError('Network error: ' + e.message);
+                btn.disabled = false;
+            }
+        }
+
+        async function resumeTraining() {
+            const configPath = document.getElementById('config-select').value;
+            if (!configPath) {
+                showTrainError('Please select a config file');
+                return;
+            }
+            if (!lastCheckpointInfo || !lastCheckpointInfo.has_checkpoint) {
+                showTrainError('No checkpoint found to resume');
+                return;
+            }
+            var btn = document.getElementById('btn-resume');
+            btn.disabled = true;
+            try {
+                const resp = await fetch('/api/train/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        config_path: configPath,
+                        resume_from: lastCheckpointInfo.checkpoint_path,
+                        skip_data_update: true
+                    })
+                });
+                const data = await resp.json();
+                if (!data.ok) {
+                    showTrainError(data.error || 'Failed to resume training');
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                showTrainError('Network error: ' + e.message);
+                btn.disabled = false;
+            }
+        }
+
+        async function stopTraining() {
+            var btn = document.getElementById('btn-stop');
+            btn.disabled = true;
+            try {
+                const resp = await fetch('/api/train/stop', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const data = await resp.json();
+                if (!data.ok) {
+                    showTrainError(data.error || 'Failed to stop training');
+                }
+            } catch (e) {
+                showTrainError('Network error: ' + e.message);
+            }
+        }
+
+        function updateTrainingUI(status) {
+            var state = (status && status.state) || 'idle';
+            var dot = document.getElementById('train-state-dot');
+            var text = document.getElementById('train-state-text');
+            var btnStart = document.getElementById('btn-train');
+            var btnResume = document.getElementById('btn-resume');
+            var btnStop = document.getElementById('btn-stop');
+            var configSelect = document.getElementById('config-select');
+
+            // 상태 뱃지 업데이트
+            dot.className = 'train-state-dot ' + state;
+            var stateLabels = {
+                idle: 'Idle', starting: 'Starting...', running: 'Training',
+                completed: 'Completed', failed: 'Failed', stopping: 'Stopping...'
+            };
+            text.textContent = stateLabels[state] || state;
+
+            // 버튼 가시성 업데이트
+            var isActive = (state === 'running' || state === 'starting' || state === 'stopping');
+            btnStart.style.display = isActive ? 'none' : 'inline-block';
+            btnStart.disabled = false;
+            btnStart.textContent = 'Train';
+            btnStop.style.display = isActive ? 'inline-block' : 'none';
+            btnStop.disabled = (state === 'stopping');
+            configSelect.disabled = isActive;
+
+            // Resume 버튼: 학습 중이 아닐 때만 체크포인트 확인
+            if (isActive) {
+                btnResume.style.display = 'none';
+            } else {
+                updateResumeButton();
+            }
+
+            // 완료/정지 후 체크포인트 정보 갱신
+            if (state === 'idle' || state === 'completed' || state === 'failed') {
+                checkCheckpoint();
+            }
+
+            // 실패 시 에러 표시
+            if (state === 'failed' && status.error) {
+                showTrainError(status.error);
+            }
+        }
+
+        function showTrainError(msg) {
+            var bar = document.getElementById('train-error-bar');
+            var el = document.getElementById('train-error-msg');
+            el.textContent = msg;
+            bar.style.display = 'flex';
+        }
+
+        function dismissTrainError() {
+            document.getElementById('train-error-bar').style.display = 'none';
+        }
+
+        /* ===== PREPROCESS CONTROL ===== */
+        async function startPreprocess() {
+            var btn = document.getElementById('btn-preprocess');
+            btn.disabled = true;
+            try {
+                const resp = await fetch('/api/preprocess/start', { method: 'POST' });
+                var data;
+                try { data = await resp.json(); } catch (pe) {
+                    showTrainError('Preprocess: invalid response (HTTP ' + resp.status + ')');
+                    btn.disabled = false;
+                    return;
+                }
+                if (!data.ok) {
+                    showTrainError(data.error || 'Preprocess: unknown error');
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                showTrainError('Preprocess request failed: ' + e.message);
+                btn.disabled = false;
+            }
+        }
+
+        function updatePreprocessUI(status) {
+            var state = (status && status.state) || 'idle';
+            var dot = document.getElementById('preprocess-state-dot');
+            var text = document.getElementById('preprocess-state-text');
+            var msg = document.getElementById('preprocess-msg');
+            var btn = document.getElementById('btn-preprocess');
+
+            dot.className = 'preprocess-state-dot ' + state;
+            var stateLabels = {
+                idle: 'Data', running: 'Processing...', completed: 'Data Ready', failed: 'Preprocess Failed'
+            };
+            text.textContent = stateLabels[state] || state;
+
+            // 진행 메시지 표시
+            if (status.message && state === 'running') {
+                msg.textContent = '— ' + status.message;
+            } else if (state === 'completed') {
+                msg.textContent = '';
+            } else if (state === 'idle' && status.data_ready) {
+                text.textContent = 'Data Ready';
+                dot.className = 'preprocess-state-dot completed';
+                msg.textContent = '(' + status.files_found + '/' + status.files_total + ' files)';
+            } else if (state === 'idle') {
+                msg.textContent = '(' + (status.files_found || 0) + '/' + (status.files_total || 6) + ' files)';
+            } else {
+                msg.textContent = '';
+            }
+
+            btn.disabled = (state === 'running');
+
+            if (state === 'failed' && status.error) {
+                showTrainError(status.error);
+            }
+        }
+
+        function initTrainControls() {
+            var btnTrain = document.getElementById('btn-train');
+            var btnResume = document.getElementById('btn-resume');
+            var btnStop = document.getElementById('btn-stop');
+            var btnDismiss = document.getElementById('btn-dismiss-error');
+            var btnPreprocess = document.getElementById('btn-preprocess');
+            var configSelect = document.getElementById('config-select');
+            if (btnTrain) btnTrain.addEventListener('click', startTraining);
+            if (btnResume) btnResume.addEventListener('click', resumeTraining);
+            if (btnStop) btnStop.addEventListener('click', stopTraining);
+            if (btnDismiss) btnDismiss.addEventListener('click', dismissTrainError);
+            if (btnPreprocess) btnPreprocess.addEventListener('click', startPreprocess);
+            // Config 변경 시 체크포인트 정보 갱신
+            if (configSelect) configSelect.addEventListener('change', checkCheckpoint);
+        }
+
+        // 2초 간격 폴링 (WebSocket 백업)
+        var trainStatusInterval = null;
+        function pollTrainingStatus() {
+            if (trainStatusInterval) return;
+            trainStatusInterval = setInterval(async function() {
+                try {
+                    const resp = await fetch('/api/train/status');
+                    const data = await resp.json();
+                    updateTrainingUI(data);
+                } catch (e) { /* ignore */ }
+                try {
+                    const resp2 = await fetch('/api/preprocess/status');
+                    const data2 = await resp2.json();
+                    updatePreprocessUI(data2);
+                } catch (e) { /* ignore */ }
+            }, 2000);
+        }
+
         /* ===== WEBSOCKET ===== */
         function connectWebSocket() {
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1221,9 +1731,11 @@
         window.addEventListener('load', () => {
             loadUIState();
             initLossControls();
+            initTrainControls();
             initCharts();
             const saved = loadDashboardState();
             if (saved) handleMessage({ data: JSON.stringify(saved) });
+            checkStandaloneMode();
             connectWebSocket();
         });
     </script>

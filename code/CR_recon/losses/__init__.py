@@ -6,12 +6,14 @@ from .mse_pearson import get_mse_pearson_loss
 from .mse_corr_l1 import get_mse_corr_l1_loss
 from .shape_dc import get_abs_dc_shape_loss
 from .weighted_smooth import get_weighted_smooth_loss
+from .multiscale_spectral import get_multiscale_spectral_loss
 
 _LOSSES = {
     "mse_pearson": get_mse_pearson_loss,
     "mse_corr_l1": get_mse_corr_l1_loss,
     "abs_dc_shape": get_abs_dc_shape_loss,
     "weighted_smooth": get_weighted_smooth_loss,
+    "multiscale_spectral": get_multiscale_spectral_loss,
 }
 
 

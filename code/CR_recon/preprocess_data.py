@@ -129,7 +129,7 @@ def main():
         # 3. Bayer 패턴 변환
         print("  Bayer 패턴 변환 중...")
         start_time = time.time()
-        bayer = convert_to_bayer(spectra_valid, out_len=30)
+        bayer = convert_to_bayer(spectra_valid, out_len=301)
         print(f"    출력 Shape: {bayer.shape}")
         print(f"    변환 시간: {time.time() - start_time:.2f}초")
 

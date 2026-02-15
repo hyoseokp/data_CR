@@ -28,13 +28,21 @@ from constraints import enforce_intensity_sum_range
 class Trainer:
     """학습 엔진: config 기반 모델/loss/데이터 조립 및 학습 실행."""
 
-    def __init__(self, cfg: Dict[str, Any], device: Optional[torch.device] = None):
+    def __init__(self, cfg: Dict[str, Any], device: Optional[torch.device] = None,
+                 dashboard_server: Optional['DashboardServer'] = None):
         """
         cfg: 전체 config dict (common_context_prompt.md의 Config Schema)
         device: torch.device (기본: cuda if available else cpu)
         """
         self.cfg = cfg
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # GPU 메모리 캐시 정리
+        if self.device.type == "cuda":
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
 
         # 출력 디렉토리
         self.output_dir = Path(cfg["output"]["dir"])
@@ -114,6 +122,7 @@ class Trainer:
 
         # Callbacks (대시보드 hook 등)
         self.callbacks: List[Callable] = []
+        self._stop_requested = False
 
         # 데이터 통계 계산
         self.data_stats = {
@@ -125,7 +134,14 @@ class Trainer:
 
         # Dashboard 서버
         self.dashboard_server = None
-        if cfg.get("dashboard", {}).get("enabled", False):
+        self._owns_dashboard = True  # True면 자체 생성(CLI 모드), False면 외부 전달(standalone 모드)
+        if dashboard_server is not None:
+            # 외부에서 전달받은 서버 재사용 (standalone 대시보드 모드)
+            self.dashboard_server = dashboard_server
+            self._owns_dashboard = False
+            self.dashboard_server.state["data_stats"] = self.data_stats
+            self.add_callback(DashboardHook(self))
+        elif cfg.get("dashboard", {}).get("enabled", False):
             try:
                 port = cfg["dashboard"]["port"]
                 self.dashboard_server = DashboardServer(port=port)
@@ -183,6 +199,10 @@ class Trainer:
 
         total_batches = len(self.train_loader)
         for batch_idx, (x, y) in enumerate(pbar):
+            # 배치마다 stop 체크 (dashboard stop 버튼 즉시 반응)
+            if self._stop_requested:
+                raise KeyboardInterrupt("Stop requested from dashboard")
+
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
 
@@ -335,6 +355,9 @@ class Trainer:
 
         total_batches = len(self.val_loader)
         for batch_idx, (x, y) in enumerate(pbar):
+            if self._stop_requested:
+                raise KeyboardInterrupt("Stop requested from dashboard")
+
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
 
@@ -564,10 +587,16 @@ class Trainer:
         self.log("=" * 80, True)
         self.log("", True)
 
-        # Dashboard 서버 시작
+        # Dashboard 서버 시작 (자체 생성한 경우만 start/stop 관리)
         if self.dashboard_server:
+            if self._owns_dashboard:
+                try:
+                    self.dashboard_server.start()
+                    self.log("Dashboard server started", True)
+                except Exception as e:
+                    self.log(f"[WARNING] Failed to start dashboard server: {e}", also_console=True)
+            # 대시보드 상태 초기화 (소유 여부와 무관)
             try:
-                self.dashboard_server.start()
                 if not is_resume:
                     self.dashboard_server.reset_state()
                 else:
@@ -581,9 +610,10 @@ class Trainer:
                         self.dashboard_server.state["train_loss"] = float(self.train_losses[-1])
                     if self.val_losses:
                         self.dashboard_server.state["val_loss"] = float(self.val_losses[-1])
-                self.log("Dashboard server started", True)
+                # data_stats 다시 설정
+                self.dashboard_server.state["data_stats"] = self.data_stats
             except Exception as e:
-                self.log(f"[WARNING] Failed to start dashboard server: {e}", also_console=True)
+                self.log(f"[WARNING] Failed to initialize dashboard state: {e}", also_console=True)
 
         epochs = self.cfg["training"]["epochs"]
 
@@ -642,8 +672,8 @@ class Trainer:
 
         self.log(f"Training complete! best_val_loss={self.best_val_loss:.6e}", True)
 
-        # Dashboard 서버 종료
-        if self.dashboard_server:
+        # Dashboard 서버 종료 (자체 생성한 경우만)
+        if self.dashboard_server and self._owns_dashboard:
             try:
                 self.dashboard_server.stop()
                 self.log("Dashboard server stopped", True)

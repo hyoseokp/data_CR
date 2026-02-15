@@ -10,7 +10,7 @@ data:
   spectra_files:
     - "../../data_CR-main/spectra_latest_0.npy"
     - "../../data_CR-main/spectra_latest_1.npy"
-  out_len: 30
+  out_len: 301
   map_to_pm1: true
   augment_180: true
   train_ratio: 0.9
@@ -18,20 +18,25 @@ data:
   num_workers: 0
 
 model:
-  name: "cnn_gru"
+  name: "cnn_xattn"
   params:
-    out_len: 30
+    out_len: 301
     d_model: 64
+    nhead: 4
+    dec_layers: 2
     cnn_dropout: 0.05
-    gru_layers: 1
+    tr_dropout: 0.1
     head_dropout: 0.1
     use_circular_padding: false
 
 loss:
-  name: "mse_pearson"
+  name: "multiscale_spectral"
   params:
-    w_mse: 0.5
-    w_corr: 0.5
+    w_abs: 1.0
+    w_corr: 0.3
+    w_grad1: 0.5
+    w_grad2: 0.2
+    w_fft: 0.1
     blue_weight: 2.0
 
 training:
