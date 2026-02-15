@@ -6,6 +6,7 @@ CLI 진입점: python train.py --config configs/default.yaml
 """
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -111,16 +112,23 @@ def _download_progress(block_num, block_size, total_size):
         print(f"\r[DOWNLOAD] {mb_done:.1f} MB", end="", flush=True)
 
 
-def ensure_latest_data(data_dir):
+def ensure_latest_data(data_dir, cfg_dir=None):
     """
     GitHub(hyoseokp/data_CR)에서 최신 데이터를 zip으로 다운로드.
     - .last_update 타임스탬프를 확인하여 1일 미만이면 스킵
     - spectra_latest 파일 변경 시 dataset/bayer/ 삭제 → 재전처리 유도
     - binary_dataset 파일은 로컬에 없을 때만 복사
     - 다운로드 실패 시 경고만 출력하고 기존 데이터로 진행
+
+    Args:
+        data_dir: data_CR-main 디렉토리 경로
+        cfg_dir: CR_recon 디렉토리 경로 (spectra 변경 감지 시 bayer/ 삭제용)
     """
     data_dir = Path(data_dir)
     last_update_file = data_dir / ".last_update"
+
+    # spectra 해시 저장 파일
+    spectra_hash_file = data_dir / ".spectra_hash"
 
     # 1) 최신 여부 확인
     if last_update_file.exists():
@@ -130,7 +138,7 @@ def ensure_latest_data(data_dir):
             if elapsed < UPDATE_INTERVAL_SEC:
                 hours = elapsed / 3600
                 print(f"[INFO] 데이터 최신 상태 (마지막 업데이트: {hours:.1f}시간 전)")
-                return
+                return False  # spectra 변경 없음
         except (ValueError, OSError):
             pass  # 파일 손상 → 업데이트 진행
 
@@ -139,6 +147,14 @@ def ensure_latest_data(data_dir):
     # spectra 파일의 기존 해시 기록 (변경 감지용)
     spectra_files = ["spectra_latest_0.npy", "spectra_latest_1.npy"]
     old_hashes = {}
+    if spectra_hash_file.exists():
+        try:
+            import json
+            old_hashes = json.loads(spectra_hash_file.read_text())
+        except:
+            pass
+
+    # 현재 파일의 해시
     for name in spectra_files:
         path = data_dir / name
         if path.exists():
@@ -147,11 +163,27 @@ def ensure_latest_data(data_dir):
     tmp_zip = None
     tmp_dir = None
     try:
-        # 2) zip 다운로드
+        # 2) zip 다운로드 (타임아웃 120초, 3회 재시도)
         print(f"[INFO] 다운로드 중: {GITHUB_ZIP_URL}")
         tmp_zip = tempfile.mktemp(suffix=".zip")
-        urllib.request.urlretrieve(GITHUB_ZIP_URL, tmp_zip, reporthook=_download_progress)
-        print()  # 진행률 줄바꿈
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # socket 타임아웃 설정 (120초)
+                import socket
+                socket.setdefaulttimeout(120)
+
+                urllib.request.urlretrieve(GITHUB_ZIP_URL, tmp_zip, reporthook=_download_progress)
+                print()  # 진행률 줄바꿈
+                break  # 성공하면 루프 탈출
+            except (TimeoutError, urllib.error.URLError, OSError) as e:
+                if attempt < max_retries - 1:
+                    print(f"\n[WARN] 다운로드 실패 (시도 {attempt+1}/{max_retries}): {e}")
+                    print("[INFO] 3초 후 재시도합니다...")
+                    time.sleep(3)
+                else:
+                    raise  # 마지막 시도 실패 → 상위 except로
 
         # 3) 압축 해제
         tmp_dir = tempfile.mkdtemp()
@@ -204,28 +236,44 @@ def ensure_latest_data(data_dir):
 
         # 6) spectra 변경 감지 → dataset/bayer/ 삭제
         spectra_changed = False
+        new_hashes = {}
         for name in spectra_files:
             path = data_dir / name
             if path.exists():
                 new_hash = _md5(path)
+                new_hashes[name] = new_hash
                 old_hash = old_hashes.get(name)
                 if old_hash is None or old_hash != new_hash:
                     spectra_changed = True
-                    break
+                    print(f"[INFO] {name}가 변경되었습니다.")
             elif name in old_hashes:
                 # 이전에 있었는데 새 zip에 없다면 변경으로 간주
                 spectra_changed = True
-                break
+                print(f"[INFO] {name}이 제거되었습니다.")
+
+        # spectra 해시 저장
+        if new_hashes:
+            spectra_hash_file.write_text(json.dumps(new_hashes))
 
         if spectra_changed:
-            bayer_dir = data_dir.parent / "code" / "CR_recon" / "dataset" / "bayer"
-            if bayer_dir.exists():
-                print("[INFO] spectra 데이터가 변경되었습니다. 전처리 데이터를 삭제합니다.")
-                shutil.rmtree(str(bayer_dir))
+            # cfg_dir이 주어진 경우 dataset/bayer/ 삭제
+            if cfg_dir:
+                bayer_dir = Path(cfg_dir) / "dataset" / "bayer"
+                if bayer_dir.exists():
+                    print("[INFO] spectra 데이터가 변경되었습니다. 전처리 데이터를 삭제합니다.")
+                    shutil.rmtree(str(bayer_dir))
+                    return True  # 재전처리 필요
+            else:
+                print("[INFO] spectra 데이터가 변경되었습니다.")
 
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
-        print(f"\n[WARN] 데이터 다운로드 실패: {e}")
-        print("[WARN] 기존 데이터로 진행합니다.")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
+        print(f"\n[WARN] 데이터 다운로드 최종 실패: {type(e).__name__}: {e}")
+        print("[WARN] 가능한 원인:")
+        print("       - 네트워크 연결 끊김")
+        print("       - GitHub 서버 응답 느림")
+        print("       - 파일 크기가 매우 큼 (수 GB)")
+        print("       - 방화벽 차단")
+        print("[WARN] 기존 데이터로 학습을 계속합니다.")
     except zipfile.BadZipFile:
         print("\n[WARN] 다운로드된 zip 파일이 손상되었습니다.")
         print("[WARN] 기존 데이터로 진행합니다.")
@@ -235,6 +283,8 @@ def ensure_latest_data(data_dir):
             os.remove(tmp_zip)
         if tmp_dir and os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return False  # 다운로드 실패 또는 spectra 변경 없음
 
 
 def ensure_preprocessed_data(cfg_dir):
@@ -382,6 +432,7 @@ def main():
     # Canonical location: repo_root/data_CR-main (repo_root is .../data_CR)
     repo_root = cfg_dir.parent.parent
     data_dir = repo_root / "data_CR-main"
+    spectra_changed = False
     if not args.skip_data_update:
         # If real data already exists locally, don't waste time/bandwidth re-downloading the repo zip.
         if validate_data_files(data_dir):
@@ -399,7 +450,8 @@ def main():
         sys.exit(1)
 
     # 정제된 데이터 확인 및 자동 생성
-    if not ensure_preprocessed_data(cfg_dir):
+    # spectra가 변경되었으면 무조건 재전처리
+    if spectra_changed or not ensure_preprocessed_data(cfg_dir):
         print("\n[ERROR] 데이터 정제에 실패했습니다. 학습을 시작할 수 없습니다.")
         sys.exit(1)
 
