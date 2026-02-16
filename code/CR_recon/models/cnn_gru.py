@@ -201,4 +201,5 @@ class MetaSpec_CNNGRU(nn.Module):
         # 각 시간 스텝에 대해 head 적용
         y4 = self.head(gru_out)  # (B, out_len, 4)
         y4 = y4.permute(0, 2, 1) + self.spec_bias  # (B, 4, out_len)
+        y4 = torch.sigmoid(y4)  # [0, 1] — 물리적 범위 보장
         return y4.view(-1, 2, 2, self.out_len)

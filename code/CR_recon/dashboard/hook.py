@@ -50,6 +50,20 @@ class DashboardHook:
             if val_sample is None or train_sample is None:
                 return
 
+            # Loss component 통계 수집 (dashboard breakdown용)
+            loss_stats = {}
+            if hasattr(trainer, 'last_loss_stats'):
+                loss_stats["train"] = {k: float(v) for k, v in trainer.last_loss_stats.items()}
+            if hasattr(trainer, 'last_val_loss_stats'):
+                loss_stats["val"] = {k: float(v) for k, v in trainer.last_val_loss_stats.items()}
+
+            # 현재 실제 loss weight 값 (런타임 변경 반영)
+            live_weights = {}
+            if hasattr(trainer, 'loss_fn'):
+                for attr in ('w_mse', 'w_rel', 'w_grad'):
+                    if hasattr(trainer.loss_fn, attr):
+                        live_weights[attr] = float(getattr(trainer.loss_fn, attr))
+
             # 데이터 구성
             data = {
                 "epoch": int(epoch),
@@ -64,6 +78,8 @@ class DashboardHook:
                 "model_params": trainer.cfg["model"]["params"],
                 "loss_name": trainer.cfg["loss"]["name"],
                 "loss_params": trainer.cfg["loss"]["params"],
+                "loss_stats": loss_stats,
+                "live_weights": live_weights,
                 "data_stats": {
                     "train_size": trainer.data_stats["train_size"],
                     "val_size": trainer.data_stats["val_size"],

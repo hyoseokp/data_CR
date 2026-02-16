@@ -26,6 +26,13 @@ class TrainStartRequest(BaseModel):
     init_weights: Optional[str] = None
     skip_data_update: bool = True
 
+
+class LossWeightsRequest(BaseModel):
+    """Loss weight 업데이트 요청."""
+    w_mse: Optional[float] = None
+    w_rel: Optional[float] = None
+    w_grad: Optional[float] = None
+
 def _json_sanitize(obj: Any) -> Any:
     """
     Make payload safe for browser-side JSON.parse:
@@ -203,6 +210,52 @@ class DashboardServer:
             if not self._training_manager:
                 return {"ok": False, "error": "Not in standalone mode"}
             return self._training_manager.stop_training()
+
+        # ===== Loss Weights API =====
+
+        @self.app.post("/api/train/loss_weights")
+        async def update_loss_weights(req: LossWeightsRequest):
+            """학습 중 loss weight를 실시간으로 변경."""
+            if not self._training_manager:
+                return {"ok": False, "error": "Not in standalone mode"}
+            trainer = self._training_manager._trainer
+            if trainer is None or not hasattr(trainer, 'loss_fn'):
+                return {"ok": False, "error": "No active training session"}
+            loss_fn = trainer.loss_fn
+            updated = {}
+            if req.w_mse is not None and hasattr(loss_fn, 'w_mse'):
+                loss_fn.w_mse = float(req.w_mse)
+                updated['w_mse'] = loss_fn.w_mse
+            if req.w_rel is not None and hasattr(loss_fn, 'w_rel'):
+                loss_fn.w_rel = float(req.w_rel)
+                updated['w_rel'] = loss_fn.w_rel
+            if req.w_grad is not None and hasattr(loss_fn, 'w_grad'):
+                loss_fn.w_grad = float(req.w_grad)
+                updated['w_grad'] = loss_fn.w_grad
+            # 대시보드 state에도 반영
+            if 'loss_params' in self.state:
+                self.state['loss_params'].update(updated)
+            # live_weights도 업데이트 (dashboard breakdown용)
+            if 'live_weights' not in self.state:
+                self.state['live_weights'] = {}
+            self.state['live_weights'].update(updated)
+            return {"ok": True, "updated": updated}
+
+        @self.app.get("/api/train/loss_weights")
+        async def get_loss_weights():
+            """현재 loss weight 반환."""
+            trainer = getattr(self._training_manager, '_trainer', None) if self._training_manager else None
+            if trainer is None or not hasattr(trainer, 'loss_fn'):
+                return {"ok": False, "error": "No active training session"}
+            loss_fn = trainer.loss_fn
+            return {
+                "ok": True,
+                "weights": {
+                    "w_mse": getattr(loss_fn, 'w_mse', None),
+                    "w_rel": getattr(loss_fn, 'w_rel', None),
+                    "w_grad": getattr(loss_fn, 'w_grad', None),
+                }
+            }
 
         # ===== Preprocess API =====
 
@@ -400,7 +453,7 @@ class DashboardServer:
 
     def reset_state(self):
         """상태 초기화 (새 훈련 시작 시 호출)."""
-        # training_control, preprocess_control 보존
+        # training_control, preprocess_control, model/loss 정보 보존
         tc = self.state.get("training_control", {
             "state": "idle",
             "error": None,
@@ -411,6 +464,10 @@ class DashboardServer:
             "error": None,
             "message": None,
         })
+        mn = self.state.get("model_name")
+        mp = self.state.get("model_params")
+        ln = self.state.get("loss_name")
+        lp = self.state.get("loss_params")
         self.state = {
             "epoch": 0,
             "total_epochs": 0,
@@ -437,3 +494,9 @@ class DashboardServer:
             "training_control": tc,
             "preprocess_control": pc,
         }
+        if mn:
+            self.state["model_name"] = mn
+            self.state["model_params"] = mp
+        if ln:
+            self.state["loss_name"] = ln
+            self.state["loss_params"] = lp

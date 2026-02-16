@@ -217,6 +217,17 @@ class TrainingManager:
             if not ensure_preprocessed_data(cfg_dir):
                 raise RuntimeError("Data preprocessing failed")
 
+            # 모델/손실 함수 정보를 대시보드에 즉시 전송
+            self.server.state["model_name"] = cfg["model"]["name"]
+            self.server.state["model_params"] = cfg["model"].get("params", {})
+            self.server.state["loss_name"] = cfg["loss"]["name"]
+            self.server.state["loss_params"] = cfg["loss"].get("params", {})
+            if self.server.is_running():
+                try:
+                    self.server.push_update({})
+                except Exception:
+                    pass
+
             # 대시보드 활성화 (외부 서버 전달)
             cfg.setdefault("dashboard", {})["enabled"] = True
 

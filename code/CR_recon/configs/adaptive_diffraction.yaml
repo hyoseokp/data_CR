@@ -1,0 +1,63 @@
+seed: 42
+
+data:
+  struct_files:
+    - "../../data_CR-main/binary_dataset_128_0.npy"
+    - "../../data_CR-main/binary_dataset_128_1.npy"
+  spectra_files:
+    - "../../data_CR-main/spectra_latest_0.npy"
+    - "../../data_CR-main/spectra_latest_1.npy"
+  out_len: 301
+  map_to_pm1: true
+  augment_180: true
+  train_ratio: 0.95
+  batch_size: 512
+  num_workers: 0
+
+model:
+  name: "cnn_diffraction"
+  params:
+    out_len: 301
+    d_model: 256
+    nhead: 8
+    dec_layers: 4
+    ff_mult: 4
+    cnn_dropout: 0.02
+    dec_dropout: 0.03
+    head_dropout: 0.05
+    wav_conv_kernel: 15
+    use_circular_padding: true
+    use_fourier_mixing: true
+
+loss:
+  name: "adaptive_spectral"
+  params:
+    w_mse: 1.0
+    w_rel: 1.0
+    w_grad: 100.0
+    rel_eps: 1.0e-4
+    rel_max: 10.0
+    blue_weight: 2.0
+    use_uncertainty: false
+
+training:
+  epochs: 500
+  lr: 0.0016
+  weight_decay: 0.005
+  grad_clip: 0.5
+  use_amp: true
+  warmup_ratio: 0.05
+  save_every: 10
+
+dashboard:
+  enabled: true
+  port: 8501
+
+constraints:
+  sum_min: 0.0
+  sum_max: 3.0
+  physical_is_negative: false
+
+output:
+  dir: "outputs/"
+  log_file: "train_log.txt"

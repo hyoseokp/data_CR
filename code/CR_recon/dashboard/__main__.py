@@ -5,8 +5,10 @@ Usage: python -m dashboard [--port 8501] [--config configs/default.yaml]
 대시보드를 독립적으로 실행하여 브라우저에서 Train 버튼으로 학습을 시작할 수 있다.
 """
 import argparse
+import os
 import signal
 import sys
+import threading
 from pathlib import Path
 
 # CR_recon 디렉토리를 sys.path에 추가 (from utils, trainer 등의 import를 위해)
@@ -38,11 +40,37 @@ def main():
     server.set_training_manager(training_manager)
 
     # Ctrl+C graceful shutdown
+    _shutting_down = False
+
     def shutdown(sig, frame):
+        nonlocal _shutting_down
+        if _shutting_down:
+            # 두 번째 Ctrl+C → 즉시 강제 종료
+            print("\n[INFO] Force exit.")
+            os._exit(1)
+        _shutting_down = True
         print("\n[INFO] Shutting down...")
-        training_manager.stop_training()
-        server.stop()
-        sys.exit(0)
+
+        def _cleanup():
+            try:
+                training_manager.stop_training()
+            except Exception:
+                pass
+            try:
+                server.stop()
+            except Exception:
+                pass
+            # 정리 후 강제 종료 (uvicorn event loop가 걸릴 수 있으므로)
+            os._exit(0)
+
+        # 별도 스레드에서 정리 (signal handler에서 직접 하면 deadlock 가능)
+        cleanup_thread = threading.Thread(target=_cleanup, daemon=True)
+        cleanup_thread.start()
+        # 3초 안에 정리 안되면 강제 종료
+        cleanup_thread.join(timeout=3.0)
+        if cleanup_thread.is_alive():
+            print("[INFO] Cleanup timeout, force exit.")
+        os._exit(0)
 
     signal.signal(signal.SIGINT, shutdown)
 

@@ -539,6 +539,97 @@
             margin: 0 4px;
         }
 
+        /* ===== LOSS WEIGHT CONTROL & BREAKDOWN ===== */
+        .loss-control-panel {
+            display: none;
+            margin-top: 8px;
+            padding: 10px 14px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .loss-control-panel.visible { display: block; }
+        .loss-control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .loss-control-header h5 {
+            margin: 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .loss-weights-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .loss-weight-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .loss-weight-item label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .loss-weight-item input {
+            width: 100%;
+            padding: 4px 8px;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg);
+            color: var(--text);
+            box-sizing: border-box;
+        }
+        .loss-weight-item input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .loss-breakdown-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .loss-breakdown-table th {
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            padding: 3px 6px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+        }
+        .loss-breakdown-table td {
+            padding: 3px 6px;
+            color: var(--text);
+        }
+        .loss-breakdown-table .pct-bar {
+            display: inline-block;
+            height: 10px;
+            border-radius: 2px;
+            vertical-align: middle;
+        }
+        .loss-apply-btn {
+            padding: 4px 14px;
+            font-size: 11px;
+            font-weight: 600;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: var(--accent);
+            color: white;
+        }
+        .loss-apply-btn:hover { background: #4f46e5; }
+
         /* ===== RESPONSIVE ===== */
         @media (max-width: 1100px) {
             .metrics-row { grid-template-columns: repeat(3, 1fr); }
@@ -617,6 +708,36 @@
             <span id="train-error-msg"></span>
             <button class="train-error-dismiss" id="btn-dismiss-error" type="button">Dismiss</button>
         </div>
+    </div>
+
+    <!-- ===== LOSS WEIGHT CONTROL & BREAKDOWN ===== -->
+    <div id="loss-control-panel" class="loss-control-panel">
+        <div class="loss-control-header">
+            <h5>Loss Weights (live)</h5>
+            <button id="btn-apply-weights" class="loss-apply-btn" type="button">Apply</button>
+        </div>
+        <div class="loss-weights-grid">
+            <div class="loss-weight-item">
+                <label>w_mse</label>
+                <input type="number" id="input-w-mse" step="0.1" min="0" value="1.0">
+            </div>
+            <div class="loss-weight-item">
+                <label>w_rel</label>
+                <input type="number" id="input-w-rel" step="0.1" min="0" value="1.0">
+            </div>
+            <div class="loss-weight-item">
+                <label>w_grad</label>
+                <input type="number" id="input-w-grad" step="10" min="0" value="100.0">
+            </div>
+        </div>
+        <table class="loss-breakdown-table">
+            <thead>
+                <tr><th>Term</th><th>Raw Value</th><th>Weighted</th><th>Ratio</th><th style="width:40%"></th></tr>
+            </thead>
+            <tbody id="loss-breakdown-body">
+                <tr><td colspan="5" style="color:var(--text-muted);text-align:center;">Waiting for data...</td></tr>
+            </tbody>
+        </table>
     </div>
 
     <!-- ===== PROGRESS STRIP ===== -->
@@ -821,6 +942,7 @@
             lastLossName: null,
             lossScale: 'log',      // 'log' | 'linear'
             lossWindow: 'all',     // 'all' | 10 | 50
+            _lossWeightsInitialized: false,
             currentData: {
                 epoch: 0, total_epochs: 0, lr: 0.0,
                 train_loss: 0.0, val_loss: 0.0, best_val: Infinity,
@@ -951,7 +1073,16 @@
                             legend: { display: true, position: 'top',
                                 labels: { usePointStyle: true, pointStyle: 'line', font: { size: 12, family: fontFamily } }
                             },
-                            tooltip: { backgroundColor: '#0f172a', titleFont: { size: 12 }, bodyFont: { size: 11 } }
+                            tooltip: {
+                                backgroundColor: '#0f172a', titleFont: { size: 12 }, bodyFont: { size: 11, family: "'JetBrains Mono', monospace" },
+                                callbacks: {
+                                    label: function(ctx) {
+                                        var v = ctx.parsed.y;
+                                        if (v == null) return ctx.dataset.label;
+                                        return ctx.dataset.label + ': ' + v.toFixed(5);
+                                    }
+                                }
+                            }
                         },
                         scales: {
                             y: {
@@ -1003,6 +1134,16 @@
                                     font: { size: 11, family: fontFamily },
                                     boxWidth: 20
                                 }
+                            },
+                            tooltip: {
+                                backgroundColor: '#0f172a', titleFont: { size: 12 }, bodyFont: { size: 11, family: "'JetBrains Mono', monospace" },
+                                callbacks: {
+                                    label: function(ctx) {
+                                        var v = ctx.parsed.y;
+                                        if (v == null) return ctx.dataset.label;
+                                        return ctx.dataset.label + ': ' + v.toFixed(5);
+                                    }
+                                }
                             }
                         },
                         scales: {
@@ -1040,6 +1181,16 @@
                         plugins: {
                             legend: { display: true, position: 'top',
                                 labels: { usePointStyle: true, pointStyle: 'line', font: { size: 11, family: fontFamily }, boxWidth: 20 }
+                            },
+                            tooltip: {
+                                backgroundColor: '#0f172a', titleFont: { size: 12 }, bodyFont: { size: 11, family: "'JetBrains Mono', monospace" },
+                                callbacks: {
+                                    label: function(ctx) {
+                                        var v = ctx.parsed.y;
+                                        if (v == null) return ctx.dataset.label;
+                                        return ctx.dataset.label + ': ' + v.toFixed(5);
+                                    }
+                                }
                             }
                         },
                         scales: {
@@ -1331,6 +1482,43 @@
                     ', L=' + modelParams.dec_layers +
                     ', drop_cnn=' + dc + ', drop_tr=' + dt + ', drop_head=' + dh +
                     ', circular_pad=' + ucp + '</span></div></div>';
+            } else if (modelName === 'cnn_diffraction') {
+                const dc = (modelParams.cnn_dropout ?? '--');
+                const dd = (modelParams.dec_dropout ?? '--');
+                const dh = (modelParams.head_dropout ?? '--');
+                const ucp = (modelParams.use_circular_padding ?? '--');
+                const ufm = (modelParams.use_fourier_mixing ?? '--');
+                const wk = (modelParams.wav_conv_kernel ?? '--');
+                mHTML = '<div style="margin-bottom:8px"><strong>MetaSpec_DiffractionNet</strong></div>' +
+                    '<div style="font-size:12px;line-height:1.8">' +
+                    '<div>Input: $x \\in \\mathbb{R}^{1 \\times 128 \\times 128}$ &rarr; Output: $y \\in \\mathbb{R}^{2 \\times 2 \\times ' + modelParams.out_len + '}$</div>' +
+                    '<div style="margin-top:4px">CNN + FFT Mixing + Cross-Attn Decoder &nbsp;|&nbsp; ' +
+                    '<span style="font-family:monospace;font-size:11px">d=' + modelParams.d_model + ', h=' + modelParams.nhead +
+                    ', L=' + modelParams.dec_layers +
+                    ', wav_k=' + wk +
+                    ', drop_cnn=' + dc + ', drop_dec=' + dd + ', drop_head=' + dh +
+                    ', fourier=' + ufm + ', circular=' + ucp + '</span></div></div>';
+            } else if (modelName === 'se_disco') {
+                const w = (modelParams.width ?? 64);
+                const fnoB = (modelParams.fno_blocks ?? 4);
+                const fnoM = (modelParams.fno_modes ?? 16);
+                const zD = (modelParams.z_dim ?? 256);
+                const sH = (modelParams.siren_hidden ?? 256);
+                const sL = (modelParams.siren_layers ?? 6);
+                const om = (modelParams.omega0 ?? 30);
+                const de = (modelParams.enc_dropout ?? '--');
+                const dh = (modelParams.head_dropout ?? '--');
+                const tta = (modelParams.use_tta_symmetry ?? false);
+                mHTML = '<div style="margin-bottom:8px"><strong>SE-DiSCO</strong></div>' +
+                    '<div style="font-size:12px;line-height:1.8">' +
+                    '<div>Input: $x \\in \\mathbb{R}^{1 \\times 128 \\times 128}$ &rarr; Output: $y \\in \\mathbb{R}^{2 \\times 2 \\times ' + modelParams.out_len + '}$</div>' +
+                    '<div style="margin-top:4px">Dual-Domain Encoder + FNO2D + FiLM-SIREN</div>' +
+                    '<div style="font-size:11px;margin-top:4px;line-height:1.9">' +
+                    '$\\text{Encoder: Real}(x) \\oplus \\text{K-space}(\\log(1+|\\mathcal{F}(x)|))$ &rarr; fuse at $32{\\times}32$<br>' +
+                    '$\\text{FNO2D} \\times ' + fnoB + '$: spectral conv (modes=' + fnoM + ') + 1x1 bypass<br>' +
+                    '$z \\in \\mathbb{R}^{' + zD + '}$ &rarr; FiLM-SIREN(' + sL + ' layers, $\\omega_0$=' + om + ', h=' + sH + ')</div>' +
+                    '<div style="font-size:11px;margin-top:6px">' +
+                    '<span style="font-family:monospace">W=' + w + ', drop_enc=' + de + ', drop_head=' + dh + ', TTA=' + tta + '</span></div></div>';
             } else if (modelName === 'cnn_gru') {
                 const dc = (modelParams.cnn_dropout ?? '--');
                 const dh = (modelParams.head_dropout ?? null);
@@ -1383,6 +1571,61 @@
                     ' + ' + wS + ' \\cdot ' + shapeTerm + '$$' +
                     '<div style="font-size:11px;margin-top:2px">Parameters: ' +
                     '<span style="font-family:monospace">beta=' + beta + ', shape_kind=' + escapeHtml(sKind) + ', beta_s=' + sBeta + ', blue_weight=' + bw + '</span></div></div>';
+            } else if (lossName === 'adaptive_spectral') {
+                const wMSE = (lossParams.w_mse !== undefined) ? lossParams.w_mse : 1.0;
+                const wRel = (lossParams.w_rel !== undefined) ? lossParams.w_rel : 1.0;
+                const wGrad = (lossParams.w_grad !== undefined) ? lossParams.w_grad : 1.0;
+                const relEps = (lossParams.rel_eps !== undefined) ? lossParams.rel_eps : 1e-4;
+                const relMax = (lossParams.rel_max !== undefined) ? lossParams.rel_max : 10.0;
+                const bw = (lossParams.blue_weight !== undefined) ? lossParams.blue_weight : 2.0;
+                const useUnc = (lossParams.use_uncertainty !== undefined) ? lossParams.use_uncertainty : false;
+                if (useUnc) {
+                    lHTML = '<div style="margin-bottom:8px"><strong>Adaptive Spectral Loss v3 (EMA Auto-balanced)</strong></div>' +
+                        '<div style="font-size:12px;line-height:2">' +
+                        '$$\\mathcal{L} = w_1 \\frac{\\mathcal{L}_{\\text{MSE}}}{\\text{EMA}} + w_2 \\frac{\\mathcal{L}_{\\text{Rel}}}{\\text{EMA}} + w_3 \\frac{\\mathcal{L}_{\\text{Grad}}}{\\text{EMA}}$$' +
+                        '<div style="font-size:11px;margin-top:4px;line-height:1.9">' +
+                        '$\\mathcal{L}_{\\text{MSE}} = \\| \\hat{y} - y \\|_2^2$ &mdash; absolute accuracy<br>' +
+                        '$\\mathcal{L}_{\\text{Rel}} = \\left\\| \\frac{\\hat{y} - y}{|y| + \\epsilon} \\right\\|_2^2$ &mdash; relative accuracy<br>' +
+                        '$\\mathcal{L}_{\\text{Grad}} = \\| \\Delta\\hat{y} - \\Delta y \\|_2^2$ &mdash; derivative accuracy (peak shape)</div>' +
+                        '<div style="font-size:11px;margin-top:6px">' +
+                        '<span style="font-family:monospace">w=[' + wMSE + ',' + wRel + ',' + wGrad + '], rel_eps=' + relEps + ', rel_max=' + relMax + ', blue_w=' + bw + '</span></div></div>';
+                } else {
+                    lHTML = '<div style="margin-bottom:8px"><strong>Adaptive Spectral Loss v3 (MSE + RelMSE + GradMSE)</strong></div>' +
+                        '<div style="font-size:12px;line-height:2">' +
+                        '$$\\mathcal{L} = ' + wMSE + '\\,\\mathcal{L}_{\\text{MSE}} + ' +
+                        wRel + '\\,\\mathcal{L}_{\\text{Rel}} + ' +
+                        wGrad + '\\,\\mathcal{L}_{\\text{Grad}}$$' +
+                        '<div style="font-size:11px;margin-top:4px;line-height:1.9">' +
+                        '$\\mathcal{L}_{\\text{MSE}} = \\| \\hat{y} - y \\|_2^2$ &mdash; absolute accuracy<br>' +
+                        '$\\mathcal{L}_{\\text{Rel}} = \\left\\| \\frac{\\hat{y} - y}{|y| + \\epsilon} \\right\\|_2^2$ &mdash; relative accuracy<br>' +
+                        '$\\mathcal{L}_{\\text{Grad}} = \\| \\Delta\\hat{y} - \\Delta y \\|_2^2$ &mdash; derivative accuracy (peak shape)</div>' +
+                        '<div style="font-size:11px;margin-top:6px">' +
+                        '<span style="font-family:monospace">rel_eps=' + relEps + ', rel_max=' + relMax + ', blue_w=' + bw + '</span></div></div>';
+                }
+            } else if (lossName === 'multiscale_spectral') {
+                const wAbs = (lossParams.w_abs !== undefined) ? lossParams.w_abs : 1.0;
+                const wCorr = (lossParams.w_corr !== undefined) ? lossParams.w_corr : 0.3;
+                const wG1 = (lossParams.w_grad1 !== undefined) ? lossParams.w_grad1 : 0.5;
+                const wG2 = (lossParams.w_grad2 !== undefined) ? lossParams.w_grad2 : 0.2;
+                const wFFT = (lossParams.w_fft !== undefined) ? lossParams.w_fft : 0.1;
+                const beta = (lossParams.beta !== undefined) ? lossParams.beta : 0.02;
+                const bw = (lossParams.blue_weight !== undefined) ? lossParams.blue_weight : 2.0;
+                const fftR = (lossParams.fft_start_ratio !== undefined) ? lossParams.fft_start_ratio : 0.5;
+                lHTML = '<div style="margin-bottom:8px"><strong>Multi-Scale Spectral Loss</strong></div>' +
+                    '<div style="font-size:12px;line-height:2">' +
+                    '$$\\mathcal{L} = ' + wAbs + '\\, \\mathcal{L}_{\\text{abs}} + ' +
+                    wCorr + '\\, \\mathcal{L}_{\\text{corr}} + ' +
+                    wG1 + '\\, \\mathcal{L}_{\\nabla} + ' +
+                    wG2 + '\\, \\mathcal{L}_{\\nabla^2} + ' +
+                    wFFT + '\\, \\mathcal{L}_{\\text{fft}}$$' +
+                    '<div style="font-size:11px;margin-top:4px;line-height:1.9">' +
+                    '$\\mathcal{L}_{\\text{abs}} = \\text{SmoothL1}_{\\beta}(\\hat{y},\\, y)$ &mdash; absolute accuracy<br>' +
+                    '$\\mathcal{L}_{\\text{corr}} = \\mathbb{E}[1 - r_{\\text{Pearson}}]$ &mdash; global shape (low-freq)<br>' +
+                    '$\\mathcal{L}_{\\nabla} = \\text{SmoothL1}_{\\beta}(\\Delta\\hat{y},\\, \\Delta y)$ &mdash; 1st derivative (high-freq)<br>' +
+                    '$\\mathcal{L}_{\\nabla^2} = \\text{SmoothL1}_{\\beta}(\\Delta^2\\hat{y},\\, \\Delta^2 y)$ &mdash; 2nd derivative (high-freq)<br>' +
+                    '$\\mathcal{L}_{\\text{fft}} = \\| |\\mathcal{F}(\\hat{y})|_{\\text{HF}} - |\\mathcal{F}(y)|_{\\text{HF}} \\|_1$ &mdash; FFT high-freq magnitude</div>' +
+                    '<div style="font-size:11px;margin-top:6px">' +
+                    '<span style="font-family:monospace">beta=' + beta + ', blue_weight=' + bw + ', fft_start=' + fftR + '</span></div></div>';
             }
 
             if (!mHTML) {
@@ -1709,9 +1952,151 @@
                         }
                     }
                 }
+                // Loss weight control panel & breakdown
+                if (data.loss_name === 'adaptive_spectral') {
+                    var lcp = document.getElementById('loss-control-panel');
+                    if (lcp) lcp.classList.add('visible');
+                    // 실시간 weight 값으로 input 초기화 (live_weights가 있을 때만, 최초 1회)
+                    if (data.live_weights && !dashboard._lossWeightsInitialized) {
+                        if (data.live_weights.w_mse !== undefined)
+                            document.getElementById('input-w-mse').value = data.live_weights.w_mse;
+                        if (data.live_weights.w_rel !== undefined)
+                            document.getElementById('input-w-rel').value = data.live_weights.w_rel;
+                        if (data.live_weights.w_grad !== undefined)
+                            document.getElementById('input-w-grad').value = data.live_weights.w_grad;
+                        dashboard._lossWeightsInitialized = true;
+                    } else if (data.loss_params && !dashboard._lossWeightsInitialized) {
+                        if (data.loss_params.w_mse !== undefined)
+                            document.getElementById('input-w-mse').value = data.loss_params.w_mse;
+                        if (data.loss_params.w_rel !== undefined)
+                            document.getElementById('input-w-rel').value = data.loss_params.w_rel;
+                        if (data.loss_params.w_grad !== undefined)
+                            document.getElementById('input-w-grad').value = data.loss_params.w_grad;
+                        dashboard._lossWeightsInitialized = true;
+                    }
+                    // Loss breakdown 업데이트
+                    if (data.loss_stats) {
+                        var weights = data.live_weights || data.loss_params || {};
+                        updateLossBreakdown(data.loss_stats, weights);
+                    }
+                }
+
             } catch (err) {
                 console.error('Message parse error:', err);
             }
+        }
+
+        /* ===== LOSS WEIGHT CONTROL FUNCTIONS ===== */
+
+        async function applyLossWeights() {
+            var wMse = parseFloat(document.getElementById('input-w-mse').value);
+            var wRel = parseFloat(document.getElementById('input-w-rel').value);
+            var wGrad = parseFloat(document.getElementById('input-w-grad').value);
+            if (isNaN(wMse) || isNaN(wRel) || isNaN(wGrad)) {
+                alert('Invalid weight values');
+                return;
+            }
+            try {
+                var resp = await fetch('/api/train/loss_weights', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({w_mse: wMse, w_rel: wRel, w_grad: wGrad})
+                });
+                var result = await resp.json();
+                if (result.ok) {
+                    var btn = document.getElementById('btn-apply-weights');
+                    btn.textContent = 'Applied!';
+                    btn.style.background = '#22c55e';
+                    // 다음 epoch에서 weight가 업데이트되었음을 반영하도록 초기화 플래그 리셋
+                    dashboard._lossWeightsInitialized = true;
+                    setTimeout(function() {
+                        btn.textContent = 'Apply';
+                        btn.style.background = '';
+                    }, 2000);
+                } else {
+                    alert('Failed: ' + (result.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Network error: ' + e.message);
+            }
+        }
+
+        function updateLossBreakdown(stats, weights) {
+            var tbody = document.getElementById('loss-breakdown-body');
+            if (!tbody) return;
+
+            // train과 val 모두 표시 (val 우선, 없으면 train)
+            var trainStats = stats.train || {};
+            var valStats = stats.val || {};
+
+            // 현재 weight 값
+            var wMse = parseFloat(weights.w_mse) || 1.0;
+            var wRel = parseFloat(weights.w_rel) || 1.0;
+            var wGrad = parseFloat(weights.w_grad) || 1.0;
+
+            var terms = [
+                { name: 'MSE', key: 'l_abs', weight: wMse, color: '#3b82f6' },
+                { name: 'RelMSE', key: 'l_dc', weight: wRel, color: '#f59e0b' },
+                { name: 'GradMSE', key: 'l_shape', weight: wGrad, color: '#22c55e' }
+            ];
+
+            // Weighted 값 계산 (val 기준, 없으면 train)
+            var useStats = (valStats.l_abs !== undefined) ? valStats : trainStats;
+            var totalWeighted = 0;
+            terms.forEach(function(t) {
+                var raw = useStats[t.key] || 0;
+                t.raw = raw;
+                t.weighted = raw * t.weight;
+                totalWeighted += t.weighted;
+            });
+
+            // HTML 생성
+            var html = '';
+            // 헤더: Train / Val 라벨
+            var stageLabel = (valStats.l_abs !== undefined) ? 'Val' : 'Train';
+            terms.forEach(function(t) {
+                var pct = totalWeighted > 0 ? (t.weighted / totalWeighted * 100) : 0;
+                var barWidth = Math.min(pct, 100);
+                html += '<tr>' +
+                    '<td style="font-weight:600;color:' + t.color + '">' + t.name + '</td>' +
+                    '<td>' + t.raw.toExponential(2) + '</td>' +
+                    '<td>' + t.weighted.toExponential(2) + '</td>' +
+                    '<td>' + pct.toFixed(1) + '%</td>' +
+                    '<td><span class="pct-bar" style="width:' + barWidth + '%;background:' + t.color + '"></span></td>' +
+                    '</tr>';
+            });
+            // Total row
+            html += '<tr style="border-top:1px solid var(--border);font-weight:600">' +
+                '<td>Total (' + stageLabel + ')</td>' +
+                '<td></td>' +
+                '<td>' + totalWeighted.toExponential(2) + '</td>' +
+                '<td>100%</td>' +
+                '<td></td></tr>';
+
+            // train 통계도 있으면 두 번째 세트 표시
+            if (valStats.l_abs !== undefined && trainStats.l_abs !== undefined) {
+                var trainTotal = 0;
+                var trainTerms = terms.map(function(t) {
+                    var raw = trainStats[t.key] || 0;
+                    var w = raw * t.weight;
+                    trainTotal += w;
+                    return { name: t.name, raw: raw, weighted: w, color: t.color };
+                });
+                html += '<tr><td colspan="5" style="padding-top:6px;font-size:10px;color:var(--text-muted)">Train</td></tr>';
+                trainTerms.forEach(function(t) {
+                    var pct = trainTotal > 0 ? (t.weighted / trainTotal * 100) : 0;
+                    var barWidth = Math.min(pct, 100);
+                    html += '<tr style="font-size:11px;color:var(--text-secondary)">' +
+                        '<td style="color:' + t.color + '">' + t.name + '</td>' +
+                        '<td>' + t.raw.toExponential(2) + '</td>' +
+                        '<td>' + t.weighted.toExponential(2) + '</td>' +
+                        '<td>' + pct.toFixed(1) + '%</td>' +
+                        '<td><span class="pct-bar" style="width:' + barWidth + '%;background:' + t.color + ';opacity:0.5"></span></td>' +
+                        '</tr>';
+                });
+            }
+
+            tbody.innerHTML = html;
         }
 
         /* ===== TRAINING CONTROL (standalone mode) ===== */
@@ -1997,6 +2382,8 @@
             if (btnStop) btnStop.addEventListener('click', stopTraining);
             if (btnDismiss) btnDismiss.addEventListener('click', dismissTrainError);
             if (btnPreprocess) btnPreprocess.addEventListener('click', startPreprocess);
+            var btnApplyWeights = document.getElementById('btn-apply-weights');
+            if (btnApplyWeights) btnApplyWeights.addEventListener('click', applyLossWeights);
             // Config 변경 시 체크포인트 정보 갱신
             if (configSelect) configSelect.addEventListener('change', checkCheckpoint);
         }

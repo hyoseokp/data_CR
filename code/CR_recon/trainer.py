@@ -66,10 +66,12 @@ class Trainer:
         model_params = cfg["model"]["params"]
         self.model = get_model(model_name, **model_params).to(self.device)
 
-        # Loss 함수
+        # Loss 함수 (학습 가능 파라미터가 있을 수 있으므로 device로 이동)
         loss_name = cfg["loss"]["name"]
         loss_params = cfg["loss"]["params"]
         self.loss_fn = get_loss(loss_name, **loss_params)
+        if hasattr(self.loss_fn, 'to'):
+            self.loss_fn = self.loss_fn.to(self.device)
 
         # Output constraint configuration (see constraints.py + data/dataset.py sign convention)
         constraints_cfg = cfg.get("constraints", {}) if isinstance(cfg, dict) else {}
@@ -79,11 +81,20 @@ class Trainer:
         # If your "physical intensity" is represented as `-pred`, set physical_is_negative=True in config.
         self.constraint_physical_is_negative = bool(constraints_cfg.get("physical_is_negative", False))
 
-        # Optimizer
+        # Optimizer — 모델 파라미터 + loss 함수의 학습 가능 파라미터 (uncertainty weighting 등)
         lr = cfg["training"]["lr"]
         weight_decay = cfg["training"]["weight_decay"]
+        opt_params = list(self.model.parameters())
+        if hasattr(self.loss_fn, 'parameters'):
+            loss_params_list = list(self.loss_fn.parameters())
+            if loss_params_list:
+                # Loss 파라미터는 weight_decay 제외 (log-variance에 decay 적용하면 불안정)
+                opt_params = [
+                    {"params": list(self.model.parameters()), "weight_decay": weight_decay},
+                    {"params": loss_params_list, "weight_decay": 0.0},
+                ]
         self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
+            opt_params,
             lr=lr,
             weight_decay=weight_decay,
             betas=(0.9, 0.95),
@@ -156,6 +167,10 @@ class Trainer:
         self.train_losses = []
         self.val_losses = []
         self.current_epoch = 0
+
+        # 최근 epoch의 loss component 통계 (dashboard breakdown용)
+        self.last_loss_stats = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
+        self.last_val_loss_stats = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
 
     def add_callback(self, fn: Callable):
         """Callback 함수 등록 (epoch별 호출)."""
@@ -306,6 +321,8 @@ class Trainer:
             corr = {k: (corr_sum[k] / max(1, corr_count)) for k in corr_sum.keys()}
             clamp = {k: (clamp_sum[k] / max(1, clamp_count)) for k in clamp_sum.keys()}
             extra = {k: (extra_sum[k] / max(1, extra_count)) for k in extra_sum.keys()}
+            # 최근 train loss stats 저장 (dashboard breakdown용)
+            self.last_loss_stats = dict(comp)
             extra_bits = []
             if shape_kind_seen:
                 extra_bits.append(f"shape_kind={shape_kind_seen}")
@@ -424,6 +441,8 @@ class Trainer:
             corr = {k: (corr_sum[k] / max(1, corr_count)) for k in corr_sum.keys()}
             clamp = {k: (clamp_sum[k] / max(1, clamp_count)) for k in clamp_sum.keys()}
             extra = {k: (extra_sum[k] / max(1, extra_count)) for k in extra_sum.keys()}
+            # 최근 val loss stats 저장 (dashboard breakdown용)
+            self.last_val_loss_stats = dict(comp)
             extra_bits = []
             if shape_kind_seen:
                 extra_bits.append(f"shape_kind={shape_kind_seen}")
@@ -456,6 +475,11 @@ class Trainer:
             "train_losses": self.train_losses,
             "val_losses": self.val_losses,
         }
+        # Loss 함수의 학습 가능 파라미터 저장 (uncertainty weighting 등)
+        if hasattr(self.loss_fn, 'state_dict'):
+            loss_sd = self.loss_fn.state_dict()
+            if loss_sd:
+                ckpt["loss_fn"] = loss_sd
 
         # Always write "last" so `--resume outputs/<model>_last.pt` truly resumes the latest state,
         # even when the current epoch also becomes the best checkpoint.
@@ -482,6 +506,13 @@ class Trainer:
         self.best_val_loss = ckpt.get("best_val_loss", float("inf"))
         self.train_losses = ckpt.get("train_losses", [])
         self.val_losses = ckpt.get("val_losses", [])
+        # Loss 함수의 학습 가능 파라미터 복원 (uncertainty weighting 등)
+        if "loss_fn" in ckpt and hasattr(self.loss_fn, 'load_state_dict'):
+            try:
+                self.loss_fn.load_state_dict(ckpt["loss_fn"])
+                self.log("[CKPT] loss_fn state restored", also_console=False)
+            except Exception as e:
+                self.log(f"[CKPT] loss_fn state load skipped: {e}", also_console=False)
         self.log(f"[CKPT] loaded from {ckpt_path} (epoch {self.current_epoch})", also_console=True)
 
     def load_weights(self, ckpt_path: str):

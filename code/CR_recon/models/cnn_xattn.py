@@ -268,4 +268,5 @@ class MetaSpec_CNNXAttn(nn.Module):
 
         # Output head: (L, B, d_model) → (B, 4, L)
         y4 = self.head(q).permute(1, 2, 0) + self.spec_bias
+        y4 = torch.sigmoid(y4)  # [0, 1] — 물리적 범위 보장
         return y4.view(B, 2, 2, self.out_len)
