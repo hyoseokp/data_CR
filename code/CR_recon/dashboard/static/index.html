@@ -291,6 +291,48 @@
             font-size: 14px;
             margin-bottom: 10px;
         }
+        .chart-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .chart-panel-header .section-title {
+            margin-bottom: 0;
+        }
+        .sample-selector {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            user-select: none;
+        }
+        .sample-selector button {
+            width: 26px;
+            height: 26px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, color 0.15s;
+        }
+        .sample-selector button:hover {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        .sample-selector .sample-idx-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            min-width: 50px;
+            text-align: center;
+            font-weight: 600;
+        }
         .chart-container-md {
             position: relative;
             height: 280px;
@@ -583,7 +625,6 @@
             width: 100%;
             padding: 4px 8px;
             font-size: 13px;
-            font-family: 'JetBrains Mono', monospace;
             border: 1px solid var(--border);
             border-radius: 4px;
             background: var(--bg);
@@ -598,7 +639,6 @@
             width: 100%;
             border-collapse: collapse;
             font-size: 12px;
-            font-family: 'JetBrains Mono', monospace;
         }
         .loss-breakdown-table th {
             text-align: left;
@@ -722,12 +762,24 @@
                 <input type="number" id="input-w-mse" step="0.1" min="0" value="1.0">
             </div>
             <div class="loss-weight-item">
+                <label>w_mae</label>
+                <input type="number" id="input-w-mae" step="0.1" min="0" value="0.0">
+            </div>
+            <div class="loss-weight-item">
                 <label>w_rel</label>
                 <input type="number" id="input-w-rel" step="0.1" min="0" value="1.0">
             </div>
             <div class="loss-weight-item">
                 <label>w_grad</label>
                 <input type="number" id="input-w-grad" step="10" min="0" value="100.0">
+            </div>
+            <div class="loss-weight-item">
+                <label>w_grad_mae</label>
+                <input type="number" id="input-w-grad-mae" step="10" min="0" value="0.0">
+            </div>
+            <div class="loss-weight-item">
+                <label>w_curv_mae</label>
+                <input type="number" id="input-w-curv-mae" step="1" min="0" value="0.0">
             </div>
         </div>
         <table class="loss-breakdown-table">
@@ -809,11 +861,17 @@
                 </div>
                 <div style="display:flex;align-items:center;gap:8px">
                     <span class="seg-label">Window</span>
-                    <div class="segmented" id="loss-window-toggle">
-                        <button class="seg-btn" type="button" data-window="all">All</button>
-                        <button class="seg-btn" type="button" data-window="10">Recent 10</button>
-                        <button class="seg-btn" type="button" data-window="50">Recent 50</button>
-                    </div>
+                    <select id="loss-window-select" style="padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer;">
+                        <option value="all">All</option>
+                        <option value="10">Recent 10</option>
+                        <option value="20">Recent 20</option>
+                        <option value="50">Recent 50</option>
+                        <option value="100">Recent 100</option>
+                        <option value="200">Recent 200</option>
+                        <option value="500">Recent 500</option>
+                        <option value="custom">Custom...</option>
+                    </select>
+                    <input id="loss-window-custom" type="number" min="5" max="10000" placeholder="N" style="display:none;width:60px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
                 </div>
             </div>
         </div>
@@ -825,13 +883,22 @@
     <!-- ===== SPECTRUM + ERROR (TWO COLUMNS) ===== -->
     <div class="charts-row">
         <div class="chart-panel">
-            <div class="section-title">GT vs Prediction (R, G, B)</div>
+            <div class="chart-panel-header">
+                <div class="section-title">GT vs Prediction (R, G, B)</div>
+                <div class="sample-selector">
+                    <button onclick="changeSampleIdx(-1)" title="Previous sample">◀</button>
+                    <span class="sample-idx-label" id="sample-idx-label">1 / 1</span>
+                    <button onclick="changeSampleIdx(+1)" title="Next sample">▶</button>
+                </div>
+            </div>
             <div class="chart-container-md">
                 <canvas id="chart-spectrum"></canvas>
             </div>
         </div>
         <div class="chart-panel">
-            <div class="section-title">Absolute Error (R, G, B)</div>
+            <div class="chart-panel-header">
+                <div class="section-title">Absolute Error (R, G, B)</div>
+            </div>
             <div class="chart-container-md">
                 <canvas id="chart-error"></canvas>
             </div>
@@ -943,6 +1010,8 @@
             lossScale: 'log',      // 'log' | 'linear'
             lossWindow: 'all',     // 'all' | 10 | 50
             _lossWeightsInitialized: false,
+            sampleIdx: 0,           // 현재 선택된 샘플 인덱스
+            sampleCount: 1,         // 총 샘플 수
             currentData: {
                 epoch: 0, total_epochs: 0, lr: 0.0,
                 train_loss: 0.0, val_loss: 0.0, best_val: Infinity,
@@ -970,8 +1039,10 @@
                 if (!s) return;
                 const ui = JSON.parse(s);
                 if (ui && (ui.lossScale === 'log' || ui.lossScale === 'linear')) dashboard.lossScale = ui.lossScale;
-                if (ui && (ui.lossWindow === 'all' || ui.lossWindow === 10 || ui.lossWindow === 50 || ui.lossWindow === '10' || ui.lossWindow === '50')) {
-                    dashboard.lossWindow = (ui.lossWindow === '10' ? 10 : (ui.lossWindow === '50' ? 50 : ui.lossWindow));
+                if (ui && ui.lossWindow !== undefined) {
+                    var lw = ui.lossWindow;
+                    if (lw === 'all') { dashboard.lossWindow = 'all'; }
+                    else { var n = parseInt(lw, 10); if (n && n >= 1) dashboard.lossWindow = n; }
                 }
             } catch (e) { /* ignore */ }
         }
@@ -993,16 +1064,32 @@
         }
 
         function applyLossWindow(windowVal) {
-            const w = (windowVal === '10' || windowVal === 10) ? 10 : (windowVal === '50' || windowVal === 50) ? 50 : 'all';
+            var w = (windowVal === 'all') ? 'all' : parseInt(windowVal, 10);
+            if (typeof w === 'number' && (isNaN(w) || w < 1)) w = 'all';
             dashboard.lossWindow = w;
-            setActiveButtons(document.getElementById('loss-window-toggle'), 'data-window', dashboard.lossWindow);
+            /* sync select */
+            var sel = document.getElementById('loss-window-select');
+            var customInput = document.getElementById('loss-window-custom');
+            if (sel) {
+                var found = false;
+                for (var i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === String(w)) { sel.selectedIndex = i; found = true; break; }
+                }
+                if (!found && w !== 'all') {
+                    sel.value = 'custom';
+                    if (customInput) { customInput.style.display = ''; customInput.value = w; }
+                } else {
+                    if (customInput) customInput.style.display = 'none';
+                }
+            }
             updateLossChart(dashboard.currentData);
             saveUIState();
         }
 
         function initLossControls() {
             const scaleBox = document.getElementById('loss-scale-toggle');
-            const winBox = document.getElementById('loss-window-toggle');
+            const winSel = document.getElementById('loss-window-select');
+            const winCustom = document.getElementById('loss-window-custom');
             if (scaleBox) {
                 scaleBox.addEventListener('click', (e) => {
                     const btn = e.target.closest('button[data-scale]');
@@ -1010,15 +1097,27 @@
                     applyLossScale(btn.getAttribute('data-scale'));
                 });
             }
-            if (winBox) {
-                winBox.addEventListener('click', (e) => {
-                    const btn = e.target.closest('button[data-window]');
-                    if (!btn) return;
-                    applyLossWindow(btn.getAttribute('data-window'));
+            if (winSel) {
+                winSel.addEventListener('change', () => {
+                    if (winSel.value === 'custom') {
+                        if (winCustom) { winCustom.style.display = ''; winCustom.focus(); }
+                    } else {
+                        if (winCustom) winCustom.style.display = 'none';
+                        applyLossWindow(winSel.value);
+                    }
+                });
+            }
+            if (winCustom) {
+                winCustom.addEventListener('change', () => {
+                    var v = parseInt(winCustom.value, 10);
+                    if (v && v >= 1) applyLossWindow(v);
+                });
+                winCustom.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); winCustom.blur(); }
                 });
             }
             setActiveButtons(scaleBox, 'data-scale', dashboard.lossScale);
-            setActiveButtons(winBox, 'data-window', dashboard.lossWindow);
+            applyLossWindow(dashboard.lossWindow);
         }
 
         /* ===== CHART INIT ===== */
@@ -1079,7 +1178,7 @@
                                     label: function(ctx) {
                                         var v = ctx.parsed.y;
                                         if (v == null) return ctx.dataset.label;
-                                        return ctx.dataset.label + ': ' + v.toFixed(5);
+                                        return ctx.dataset.label + ': ' + v.toFixed(6);
                                     }
                                 }
                             }
@@ -1141,7 +1240,7 @@
                                     label: function(ctx) {
                                         var v = ctx.parsed.y;
                                         if (v == null) return ctx.dataset.label;
-                                        return ctx.dataset.label + ': ' + v.toFixed(5);
+                                        return ctx.dataset.label + ': ' + v.toFixed(6);
                                     }
                                 }
                             }
@@ -1188,7 +1287,7 @@
                                     label: function(ctx) {
                                         var v = ctx.parsed.y;
                                         if (v == null) return ctx.dataset.label;
-                                        return ctx.dataset.label + ': ' + v.toFixed(5);
+                                        return ctx.dataset.label + ': ' + v.toFixed(6);
                                     }
                                 }
                             }
@@ -1223,7 +1322,7 @@
             const va = (data && data.val_losses) ? data.val_losses : [];
             const n = tr.length;
             const w = dashboard.lossWindow;
-            const windowSize = (w === 10 || w === 50) ? w : null;
+            const windowSize = (typeof w === 'number' && w >= 1) ? w : null;
             const start = windowSize ? Math.max(0, n - windowSize) : 0;
 
             const labels = [];
@@ -1278,32 +1377,64 @@
                 if (trainBtn) trainBtn.style.background = 'var(--train-color)';
             }
 
+            // 탭 전환 시 인덱스 리셋 & 샘플 수 업데이트
+            dashboard.sampleIdx = 0;
+            if (dashboard.currentData && dashboard.currentData.samples) {
+                const { list } = getSampleListForCurrentTab(dashboard.currentData);
+                if (list) dashboard.sampleCount = list.length;
+            }
+            updateSampleIdxLabel();
+
             // Update spectrum and error charts for the new tab
             updateChartsForCurrentTab();
+            updateSampleVisualsForCurrentIdx();
+        }
+
+        /* ===== SAMPLE INDEX SELECTOR ===== */
+        function changeSampleIdx(delta) {
+            const count = dashboard.sampleCount || 1;
+            let idx = dashboard.sampleIdx + delta;
+            if (idx < 0) idx = count - 1;      // wrap around
+            if (idx >= count) idx = 0;          // wrap around
+            dashboard.sampleIdx = idx;
+            updateSampleIdxLabel();
+            updateChartsForCurrentTab();
+            // 선택된 인덱스에 맞게 input_struct, BGGR도 업데이트
+            updateSampleVisualsForCurrentIdx();
+        }
+
+        function updateSampleIdxLabel() {
+            const label = document.getElementById('sample-idx-label');
+            if (label) {
+                label.textContent = (dashboard.sampleIdx + 1) + ' / ' + (dashboard.sampleCount || 1);
+            }
+        }
+
+        function getSampleListForCurrentTab(data) {
+            if (!data || !data.samples) return { list: null, waves: [] };
+            const valContent = document.getElementById('val-sample-content');
+            const isValTab = valContent && valContent.style.display !== 'none';
+            const list = isValTab
+                ? (data.samples.val_list || (data.samples.val ? [data.samples.val] : null))
+                : (data.samples.train_list || (data.samples.train ? [data.samples.train] : null));
+            const waves = data.samples.waves || [];
+            return { list, waves };
         }
 
         function updateChartsForCurrentTab() {
             if (!dashboard.currentData) return;
             const data = dashboard.currentData;
 
-            const valContent = document.getElementById('val-sample-content');
-            const isValTab = valContent && valContent.style.display !== 'none';
+            const { list, waves } = getSampleListForCurrentTab(data);
+            if (!list || list.length === 0 || waves.length === 0) return;
 
-            // 현재 탭에 맞는 샘플 + 파장 배열 선택
-            let currentSample = null;
-            let waves = [];
+            // 샘플 수 업데이트
+            dashboard.sampleCount = list.length;
+            if (dashboard.sampleIdx >= list.length) dashboard.sampleIdx = 0;
+            updateSampleIdxLabel();
 
-            if (data.samples) {
-                // 신 형식: val/train 분리
-                currentSample = isValTab ? data.samples.val : data.samples.train;
-                waves = data.samples.waves || [];
-            } else if (data.sample) {
-                // 구 형식: 단일 sample
-                currentSample = data.sample;
-                waves = data.sample.waves || [];
-            }
-
-            if (!currentSample || !currentSample.gt_bggr || !currentSample.pred_bggr || waves.length === 0) return;
+            const currentSample = list[dashboard.sampleIdx];
+            if (!currentSample || !currentSample.gt_bggr || !currentSample.pred_bggr) return;
 
             const w = waves;
             const gtR = currentSample.gt_bggr[0][0], gtG = currentSample.gt_bggr[0][1], gtB = currentSample.gt_bggr[1][1];
@@ -1337,6 +1468,34 @@
                     ec.data.datasets[2].data = gtB.map((v, i) => Math.abs(v - predB[i]));
                 }
                 ec.update('none');
+            }
+        }
+
+        function updateSampleVisualsForCurrentIdx() {
+            if (!dashboard.currentData) return;
+            const data = dashboard.currentData;
+            const { list } = getSampleListForCurrentTab(data);
+            if (!list || list.length === 0) return;
+
+            const idx = Math.min(dashboard.sampleIdx, list.length - 1);
+            const sample = list[idx];
+            if (!sample) return;
+
+            const valContent = document.getElementById('val-sample-content');
+            const isValTab = valContent && valContent.style.display !== 'none';
+            const suffix = isValTab ? 'val' : 'train';
+
+            // Input structure
+            if (sample.input_struct && Array.isArray(sample.input_struct)) {
+                drawImage('canvas-input-' + suffix, sample.input_struct, 128);
+            }
+            // GT BGGR
+            if (sample.gt_bggr) {
+                updateBGGR('gt-' + suffix, sample.gt_bggr);
+            }
+            // Pred BGGR
+            if (sample.pred_bggr) {
+                updateBGGR('pred-' + suffix, sample.pred_bggr);
             }
         }
 
@@ -1741,173 +1900,21 @@
                 // Loss chart
                 updateLossChart(data);
 
-                // Sample visualizations
+                // Sample visualizations (multi-sample 지원)
                 if (data.samples) {
-                    const waves = data.samples.waves || [];
-
-                    // Val sample
-                    const valSample = data.samples.val;
-                    if (valSample) {
-                        if (valSample.input_struct && Array.isArray(valSample.input_struct)) {
-                            drawImage('canvas-input-val', valSample.input_struct, 128);
-                        }
-                        if (valSample.gt_bggr) {
-                            updateBGGR('gt-val', valSample.gt_bggr);
-                        }
-                        if (valSample.pred_bggr) {
-                            updateBGGR('pred-val', valSample.pred_bggr);
-                        }
+                    // 샘플 수 업데이트
+                    const { list: sampleList } = getSampleListForCurrentTab(data);
+                    if (sampleList) {
+                        dashboard.sampleCount = sampleList.length;
+                        if (dashboard.sampleIdx >= sampleList.length) dashboard.sampleIdx = 0;
+                        updateSampleIdxLabel();
                     }
 
-                    // Train sample
-                    const trainSample = data.samples.train;
-                    if (trainSample) {
-                        if (trainSample.input_struct && Array.isArray(trainSample.input_struct)) {
-                            drawImage('canvas-input-train', trainSample.input_struct, 128);
-                        }
-                        if (trainSample.gt_bggr) {
-                            updateBGGR('gt-train', trainSample.gt_bggr);
-                        }
-                        if (trainSample.pred_bggr) {
-                            updateBGGR('pred-train', trainSample.pred_bggr);
-                        }
-                    }
+                    // 현재 선택된 인덱스의 샘플로 visuals 업데이트
+                    updateSampleVisualsForCurrentIdx();
 
-                    // Spectrum + Error charts (show current tab sample)
-                    // Check if we're on val or train tab
-                    const valContent = document.getElementById('val-sample-content');
-                    const isValTab = valContent && valContent.style.display !== 'none';
-                    const currentSample = isValTab ? valSample : trainSample;
-
-                    console.log('📈 Chart Update Check:', {
-                        currentTab: isValTab ? 'val' : 'train',
-                        hasSample: !!currentSample,
-                        hasGtBggr: currentSample && !!currentSample.gt_bggr,
-                        hasPredBggr: currentSample && !!currentSample.pred_bggr,
-                        wavesLength: waves.length,
-                        canUpdate: currentSample && currentSample.gt_bggr && currentSample.pred_bggr && waves.length > 0
-                    });
-
-                    if (currentSample && currentSample.gt_bggr && currentSample.pred_bggr && waves.length > 0) {
-                        const w = waves;
-                        // [0,0]=R, [0,1]=G, [1,0]=G, [1,1]=B
-                        const gtR = currentSample.gt_bggr[0][0];
-                        const gtG = currentSample.gt_bggr[0][1];
-                        const gtB = currentSample.gt_bggr[1][1];
-                        const predR = currentSample.pred_bggr[0][0];
-                        const predG = currentSample.pred_bggr[0][1];
-                        const predB = currentSample.pred_bggr[1][1];
-
-                        console.log('📊 Spectrum Chart Data:', {
-                            labelsCount: w.length,
-                            gtRLength: gtR ? gtR.length : 0,
-                            predRLength: predR ? predR.length : 0,
-                            chartsReady: typeof Chart !== 'undefined' && !!dashboard.chartInstances.spectrum
-                        });
-
-                        if (typeof Chart !== 'undefined' && dashboard.chartInstances.spectrum) {
-                            const sc = dashboard.chartInstances.spectrum;
-                            console.log('✅ Updating spectrum chart...');
-                            console.log('📊 Spectrum data:', {
-                                labelsCount: w.length,
-                                gtRLength: gtR ? gtR.length : 0,
-                                gtRSample: gtR ? gtR.slice(0, 3) : 'null',
-                                predRSample: predR ? predR.slice(0, 3) : 'null'
-                            });
-
-                            sc.data.labels = w.map(v => v.toFixed(0));
-                            sc.data.datasets[0].data = gtR;   // R GT (dashed)
-                            sc.data.datasets[1].data = predR;  // R Pred (solid)
-                            sc.data.datasets[2].data = gtG;   // G GT
-                            sc.data.datasets[3].data = predG;  // G Pred
-                            sc.data.datasets[4].data = gtB;   // B GT
-                            sc.data.datasets[5].data = predB;  // B Pred
-
-                            // Force chart redraw
-                            sc.data.datasets.forEach(ds => {
-                                if (!ds.data || ds.data.length === 0) {
-                                    console.warn('⚠️ Empty dataset:', ds.label);
-                                }
-                            });
-
-                            sc.update('none');  // Update without animation
-                            console.log('✅ Spectrum chart updated successfully');
-                        } else {
-                            console.warn('⚠️ Spectrum chart not ready:', {
-                                chartLoaded: typeof Chart !== 'undefined',
-                                chartInstanceExists: !!dashboard.chartInstances.spectrum
-                            });
-                        }
-
-                        // Absolute error chart
-                        console.log('📊 Error Chart Check:', {
-                            hasAbsErrorBggr: !!currentSample.abs_error_bggr,
-                            chartsReady: typeof Chart !== 'undefined' && !!dashboard.chartInstances.error
-                        });
-
-                        if (currentSample.abs_error_bggr) {
-                            const errR = currentSample.abs_error_bggr[0][0];
-                            const errG = currentSample.abs_error_bggr[0][1];
-                            const errB = currentSample.abs_error_bggr[1][1];
-
-                            console.log('✅ Using abs_error_bggr data');
-
-                            if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
-                                const ec = dashboard.chartInstances.error;
-                                console.log('✅ Updating error chart with abs_error_bggr...');
-                                console.log('📊 Error data:', {
-                                    labelsCount: w.length,
-                                    errRLength: errR ? errR.length : 0,
-                                    errRSample: errR ? errR.slice(0, 3) : 'null'
-                                });
-
-                                ec.data.labels = w.map(v => v.toFixed(0));
-                                ec.data.datasets[0].data = errR;
-                                ec.data.datasets[1].data = errG;
-                                ec.data.datasets[2].data = errB;
-
-                                // Force chart redraw
-                                ec.data.datasets.forEach(ds => {
-                                    if (!ds.data || ds.data.length === 0) {
-                                        console.warn('⚠️ Empty error dataset:', ds.label);
-                                    }
-                                });
-
-                                ec.update('none');  // Update without animation
-                                console.log('✅ Error chart updated successfully');
-                            }
-                        } else {
-                            console.log('⚠️ Using fallback error calculation (abs_error_bggr not provided)');
-                            // Fallback: calculate error as |pred - gt| if abs_error_bggr not available
-                            if (typeof Chart !== 'undefined' && dashboard.chartInstances.error) {
-                                const ec = dashboard.chartInstances.error;
-                                const calcErrR = gtR.map((v, i) => Math.abs(v - predR[i]));
-                                const calcErrG = gtG.map((v, i) => Math.abs(v - predG[i]));
-                                const calcErrB = gtB.map((v, i) => Math.abs(v - predB[i]));
-
-                                console.log('✅ Updating error chart with calculated errors...');
-                                console.log('📊 Calculated error data:', {
-                                    calcErrRLength: calcErrR.length,
-                                    calcErrRSample: calcErrR.slice(0, 3)
-                                });
-
-                                ec.data.labels = w.map(v => v.toFixed(0));
-                                ec.data.datasets[0].data = calcErrR;
-                                ec.data.datasets[1].data = calcErrG;
-                                ec.data.datasets[2].data = calcErrB;
-
-                                // Force chart redraw
-                                ec.data.datasets.forEach(ds => {
-                                    if (!ds.data || ds.data.length === 0) {
-                                        console.warn('⚠️ Empty calculated error dataset:', ds.label);
-                                    }
-                                });
-
-                                ec.update('none');  // Update without animation
-                                console.log('✅ Error chart updated successfully (fallback)');
-                            }
-                        }
-                    }
+                    // Spectrum + Error charts (현재 탭 + 현재 선택 인덱스)
+                    updateChartsForCurrentTab();
                 } else if (data.sample) {
                     // Backward compatibility: 현재 실행 중인 학습이 구 형식 사용
                     const s = data.sample;
@@ -1960,18 +1967,30 @@
                     if (data.live_weights && !dashboard._lossWeightsInitialized) {
                         if (data.live_weights.w_mse !== undefined)
                             document.getElementById('input-w-mse').value = data.live_weights.w_mse;
+                        if (data.live_weights.w_mae !== undefined)
+                            document.getElementById('input-w-mae').value = data.live_weights.w_mae;
                         if (data.live_weights.w_rel !== undefined)
                             document.getElementById('input-w-rel').value = data.live_weights.w_rel;
                         if (data.live_weights.w_grad !== undefined)
                             document.getElementById('input-w-grad').value = data.live_weights.w_grad;
+                        if (data.live_weights.w_grad_mae !== undefined)
+                            document.getElementById('input-w-grad-mae').value = data.live_weights.w_grad_mae;
+                        if (data.live_weights.w_curv_mae !== undefined)
+                            document.getElementById('input-w-curv-mae').value = data.live_weights.w_curv_mae;
                         dashboard._lossWeightsInitialized = true;
                     } else if (data.loss_params && !dashboard._lossWeightsInitialized) {
                         if (data.loss_params.w_mse !== undefined)
                             document.getElementById('input-w-mse').value = data.loss_params.w_mse;
+                        if (data.loss_params.w_mae !== undefined)
+                            document.getElementById('input-w-mae').value = data.loss_params.w_mae;
                         if (data.loss_params.w_rel !== undefined)
                             document.getElementById('input-w-rel').value = data.loss_params.w_rel;
                         if (data.loss_params.w_grad !== undefined)
                             document.getElementById('input-w-grad').value = data.loss_params.w_grad;
+                        if (data.loss_params.w_grad_mae !== undefined)
+                            document.getElementById('input-w-grad-mae').value = data.loss_params.w_grad_mae;
+                        if (data.loss_params.w_curv_mae !== undefined)
+                            document.getElementById('input-w-curv-mae').value = data.loss_params.w_curv_mae;
                         dashboard._lossWeightsInitialized = true;
                     }
                     // Loss breakdown 업데이트
@@ -1990,9 +2009,12 @@
 
         async function applyLossWeights() {
             var wMse = parseFloat(document.getElementById('input-w-mse').value);
+            var wMae = parseFloat(document.getElementById('input-w-mae').value);
             var wRel = parseFloat(document.getElementById('input-w-rel').value);
             var wGrad = parseFloat(document.getElementById('input-w-grad').value);
-            if (isNaN(wMse) || isNaN(wRel) || isNaN(wGrad)) {
+            var wGradMae = parseFloat(document.getElementById('input-w-grad-mae').value);
+            var wCurvMae = parseFloat(document.getElementById('input-w-curv-mae').value);
+            if (isNaN(wMse) || isNaN(wMae) || isNaN(wRel) || isNaN(wGrad) || isNaN(wGradMae) || isNaN(wCurvMae)) {
                 alert('Invalid weight values');
                 return;
             }
@@ -2000,7 +2022,7 @@
                 var resp = await fetch('/api/train/loss_weights', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({w_mse: wMse, w_rel: wRel, w_grad: wGrad})
+                    body: JSON.stringify({w_mse: wMse, w_mae: wMae, w_rel: wRel, w_grad: wGrad, w_grad_mae: wGradMae, w_curv_mae: wCurvMae})
                 });
                 var result = await resp.json();
                 if (result.ok) {
@@ -2030,70 +2052,75 @@
             var valStats = stats.val || {};
 
             // 현재 weight 값
-            var wMse = parseFloat(weights.w_mse) || 1.0;
-            var wRel = parseFloat(weights.w_rel) || 1.0;
-            var wGrad = parseFloat(weights.w_grad) || 1.0;
+            var wMse = parseFloat(weights.w_mse) || 0;
+            var wMae = parseFloat(weights.w_mae) || 0;
+            var wRel = parseFloat(weights.w_rel) || 0;
+            var wGrad = parseFloat(weights.w_grad) || 0;
+            var wGradMae = parseFloat(weights.w_grad_mae) || 0;
+            var wCurvMae = parseFloat(weights.w_curv_mae) || 0;
 
-            var terms = [
+            // 활성화된 term만 동적 생성 (weight > 0인 것만 표시)
+            var allTerms = [
                 { name: 'MSE', key: 'l_abs', weight: wMse, color: '#3b82f6' },
+                { name: 'MAE', key: 'l_mae', weight: wMae, color: '#6366f1' },
                 { name: 'RelMSE', key: 'l_dc', weight: wRel, color: '#f59e0b' },
-                { name: 'GradMSE', key: 'l_shape', weight: wGrad, color: '#22c55e' }
+                { name: 'GradMSE', key: 'l_shape', weight: wGrad, color: '#22c55e' },
+                { name: 'GradMAE', key: 'l_grad_mae', weight: wGradMae, color: '#14b8a6' },
+                { name: 'CurvMAE', key: 'l_curv_mae', weight: wCurvMae, color: '#e879f9' }
             ];
+            var terms = allTerms.filter(function(t) { return t.weight > 0; });
 
-            // Weighted 값 계산 (val 기준, 없으면 train)
-            var useStats = (valStats.l_abs !== undefined) ? valStats : trainStats;
-            var totalWeighted = 0;
-            terms.forEach(function(t) {
-                var raw = useStats[t.key] || 0;
-                t.raw = raw;
-                t.weighted = raw * t.weight;
-                totalWeighted += t.weighted;
-            });
+            // weight가 모두 0이면 기존 3항 fallback
+            if (terms.length === 0) {
+                terms = [
+                    { name: 'MSE', key: 'l_abs', weight: 1.0, color: '#3b82f6' },
+                    { name: 'RelMSE', key: 'l_dc', weight: 1.0, color: '#f59e0b' },
+                    { name: 'GradMSE', key: 'l_shape', weight: 1.0, color: '#22c55e' }
+                ];
+            }
 
-            // HTML 생성
-            var html = '';
-            // 헤더: Train / Val 라벨
-            var stageLabel = (valStats.l_abs !== undefined) ? 'Val' : 'Train';
-            terms.forEach(function(t) {
-                var pct = totalWeighted > 0 ? (t.weighted / totalWeighted * 100) : 0;
-                var barWidth = Math.min(pct, 100);
-                html += '<tr>' +
-                    '<td style="font-weight:600;color:' + t.color + '">' + t.name + '</td>' +
-                    '<td>' + t.raw.toExponential(2) + '</td>' +
-                    '<td>' + t.weighted.toExponential(2) + '</td>' +
-                    '<td>' + pct.toFixed(1) + '%</td>' +
-                    '<td><span class="pct-bar" style="width:' + barWidth + '%;background:' + t.color + '"></span></td>' +
-                    '</tr>';
-            });
-            // Total row
-            html += '<tr style="border-top:1px solid var(--border);font-weight:600">' +
-                '<td>Total (' + stageLabel + ')</td>' +
-                '<td></td>' +
-                '<td>' + totalWeighted.toExponential(2) + '</td>' +
-                '<td>100%</td>' +
-                '<td></td></tr>';
+            // 공통 스타일
+            var labelStyle = 'padding-top:8px;font-size:12px;font-weight:700;color:var(--text)';
+            var rowStyle = 'font-size:12px;color:var(--text)';
+            var totalStyle = 'border-top:1px solid var(--border);font-weight:600;font-size:12px;color:var(--text)';
 
-            // train 통계도 있으면 두 번째 세트 표시
-            if (valStats.l_abs !== undefined && trainStats.l_abs !== undefined) {
-                var trainTotal = 0;
-                var trainTerms = terms.map(function(t) {
-                    var raw = trainStats[t.key] || 0;
+            function renderSection(sectionStats, label, barOpacity) {
+                var total = 0;
+                var rows = terms.map(function(t) {
+                    var raw = sectionStats[t.key] || 0;
                     var w = raw * t.weight;
-                    trainTotal += w;
+                    total += w;
                     return { name: t.name, raw: raw, weighted: w, color: t.color };
                 });
-                html += '<tr><td colspan="5" style="padding-top:6px;font-size:10px;color:var(--text-muted)">Train</td></tr>';
-                trainTerms.forEach(function(t) {
-                    var pct = trainTotal > 0 ? (t.weighted / trainTotal * 100) : 0;
+                var h = '<tr><td colspan="5" style="' + labelStyle + '">' + label + '</td></tr>';
+                rows.forEach(function(r) {
+                    var pct = total > 0 ? (r.weighted / total * 100) : 0;
                     var barWidth = Math.min(pct, 100);
-                    html += '<tr style="font-size:11px;color:var(--text-secondary)">' +
-                        '<td style="color:' + t.color + '">' + t.name + '</td>' +
-                        '<td>' + t.raw.toExponential(2) + '</td>' +
-                        '<td>' + t.weighted.toExponential(2) + '</td>' +
+                    var opacity = barOpacity ? ';opacity:0.5' : '';
+                    h += '<tr style="' + rowStyle + '">' +
+                        '<td style="font-weight:600;color:' + r.color + '">' + r.name + '</td>' +
+                        '<td>' + r.raw.toExponential(2) + '</td>' +
+                        '<td>' + r.weighted.toExponential(2) + '</td>' +
                         '<td>' + pct.toFixed(1) + '%</td>' +
-                        '<td><span class="pct-bar" style="width:' + barWidth + '%;background:' + t.color + ';opacity:0.5"></span></td>' +
+                        '<td><span class="pct-bar" style="width:' + barWidth + '%;background:' + r.color + opacity + '"></span></td>' +
                         '</tr>';
                 });
+                h += '<tr style="' + totalStyle + '">' +
+                    '<td>Total</td><td></td>' +
+                    '<td>' + total.toExponential(2) + '</td>' +
+                    '<td>100%</td><td></td></tr>';
+                return h;
+            }
+
+            var html = '';
+            var hasVal = (valStats.l_abs !== undefined || valStats.l_mae !== undefined);
+            var hasTrain = (trainStats.l_abs !== undefined || trainStats.l_mae !== undefined);
+
+            if (hasVal) {
+                html += renderSection(valStats, 'Validation', false);
+            }
+            if (hasTrain) {
+                html += renderSection(trainStats, hasVal ? 'Train' : 'Train', hasVal);
             }
 
             tbody.innerHTML = html;

@@ -39,6 +39,18 @@ def main():
     training_manager = TrainingManager(server, default_config=args.config)
     server.set_training_manager(training_manager)
 
+    # config가 있으면 미리 model/loss 정보를 state에 설정 (Train 전에도 UI 표시)
+    if args.config:
+        try:
+            from utils import load_config
+            _cfg = load_config(args.config)
+            server.state["model_name"] = _cfg["model"]["name"]
+            server.state["model_params"] = _cfg["model"].get("params", {})
+            server.state["loss_name"] = _cfg["loss"]["name"]
+            server.state["loss_params"] = _cfg["loss"].get("params", {})
+        except Exception as e:
+            print(f"[WARNING] Could not pre-load config info: {e}")
+
     # Ctrl+C graceful shutdown
     _shutting_down = False
 

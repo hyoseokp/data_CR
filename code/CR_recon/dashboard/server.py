@@ -30,8 +30,12 @@ class TrainStartRequest(BaseModel):
 class LossWeightsRequest(BaseModel):
     """Loss weight 업데이트 요청."""
     w_mse: Optional[float] = None
+    w_mae: Optional[float] = None
     w_rel: Optional[float] = None
     w_grad: Optional[float] = None
+    w_grad_mae: Optional[float] = None
+    w_curv_mae: Optional[float] = None
+    grad_clip: Optional[float] = None
 
 def _json_sanitize(obj: Any) -> Any:
     """
@@ -226,12 +230,25 @@ class DashboardServer:
             if req.w_mse is not None and hasattr(loss_fn, 'w_mse'):
                 loss_fn.w_mse = float(req.w_mse)
                 updated['w_mse'] = loss_fn.w_mse
+            if req.w_mae is not None and hasattr(loss_fn, 'w_mae'):
+                loss_fn.w_mae = float(req.w_mae)
+                updated['w_mae'] = loss_fn.w_mae
             if req.w_rel is not None and hasattr(loss_fn, 'w_rel'):
                 loss_fn.w_rel = float(req.w_rel)
                 updated['w_rel'] = loss_fn.w_rel
             if req.w_grad is not None and hasattr(loss_fn, 'w_grad'):
                 loss_fn.w_grad = float(req.w_grad)
                 updated['w_grad'] = loss_fn.w_grad
+            if req.w_grad_mae is not None and hasattr(loss_fn, 'w_grad_mae'):
+                loss_fn.w_grad_mae = float(req.w_grad_mae)
+                updated['w_grad_mae'] = loss_fn.w_grad_mae
+            if req.w_curv_mae is not None and hasattr(loss_fn, 'w_curv_mae'):
+                loss_fn.w_curv_mae = float(req.w_curv_mae)
+                updated['w_curv_mae'] = loss_fn.w_curv_mae
+            # grad_clip 변경 (trainer 직접 접근)
+            if req.grad_clip is not None and hasattr(trainer, 'grad_clip'):
+                trainer.grad_clip = float(req.grad_clip)
+                updated['grad_clip'] = trainer.grad_clip
             # 대시보드 state에도 반영
             if 'loss_params' in self.state:
                 self.state['loss_params'].update(updated)
@@ -252,8 +269,11 @@ class DashboardServer:
                 "ok": True,
                 "weights": {
                     "w_mse": getattr(loss_fn, 'w_mse', None),
+                    "w_mae": getattr(loss_fn, 'w_mae', None),
                     "w_rel": getattr(loss_fn, 'w_rel', None),
                     "w_grad": getattr(loss_fn, 'w_grad', None),
+                    "w_grad_mae": getattr(loss_fn, 'w_grad_mae', None),
+                    "w_curv_mae": getattr(loss_fn, 'w_curv_mae', None),
                 }
             }
 

@@ -66,6 +66,11 @@ class Trainer:
         model_params = cfg["model"]["params"]
         self.model = get_model(model_name, **model_params).to(self.device)
 
+        # Pretrained weight 부분 로드 (shape이 다른 레이어는 스킵, optimizer/epoch 초기화 안 함)
+        pretrained_from = cfg["training"].get("pretrained_from", None)
+        if pretrained_from:
+            self._load_pretrained(pretrained_from)
+
         # Loss 함수 (학습 가능 파라미터가 있을 수 있으므로 device로 이동)
         loss_name = cfg["loss"]["name"]
         loss_params = cfg["loss"]["params"]
@@ -169,8 +174,8 @@ class Trainer:
         self.current_epoch = 0
 
         # 최근 epoch의 loss component 통계 (dashboard breakdown용)
-        self.last_loss_stats = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
-        self.last_val_loss_stats = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
+        self.last_loss_stats = {"l_abs": 0.0, "l_mae": 0.0, "l_dc": 0.0, "l_shape": 0.0, "l_grad_mae": 0.0, "l_curv_mae": 0.0}
+        self.last_val_loss_stats = {"l_abs": 0.0, "l_mae": 0.0, "l_dc": 0.0, "l_shape": 0.0, "l_grad_mae": 0.0, "l_curv_mae": 0.0}
 
     def add_callback(self, fn: Callable):
         """Callback 함수 등록 (epoch별 호출)."""
@@ -191,7 +196,7 @@ class Trainer:
         """한 epoch 학습, 평균 train loss 반환."""
         self.model.train()
         total_loss = 0.0
-        comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
+        comp_sum = {"l_abs": 0.0, "l_mae": 0.0, "l_dc": 0.0, "l_shape": 0.0, "l_grad_mae": 0.0, "l_curv_mae": 0.0}
         comp_count = 0
         shape_kind_seen = None
         extra_sum = {"d1_err_mean": 0.0, "d1_err_max": 0.0}
@@ -266,10 +271,10 @@ class Trainer:
                     st = {}
                 if shape_kind_seen is None and isinstance(st.get("shape_kind"), str):
                     shape_kind_seen = st.get("shape_kind")
-                if "l_abs" in st and "l_dc" in st and "l_shape" in st:
-                    comp_sum["l_abs"] += float(st["l_abs"])
-                    comp_sum["l_dc"] += float(st["l_dc"])
-                    comp_sum["l_shape"] += float(st["l_shape"])
+                if "l_abs" in st or "l_mae" in st or "l_dc" in st or "l_shape" in st:
+                    for k in comp_sum:
+                        if k in st:
+                            comp_sum[k] += float(st[k])
                     comp_count += 1
                 # Derivative error stats (smoothl1/mse shape mode)
                 if "d1_err_mean" in st and "d1_err_max" in st and st["d1_err_mean"] == st["d1_err_mean"]:
@@ -334,9 +339,12 @@ class Trainer:
                     f"r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
                     f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e}"
                 )
+            mae_str = f" mae={comp['l_mae']:.3e}" if comp.get('l_mae', 0) > 0 else ""
+            grad_mae_str = f" grad_mae={comp['l_grad_mae']:.3e}" if comp.get('l_grad_mae', 0) > 0 else ""
+            curv_mae_str = f" curv_mae={comp['l_curv_mae']:.3e}" if comp.get('l_curv_mae', 0) > 0 else ""
             msg = (
                 "[LOSS_DIAG][train] "
-                f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
+                f"abs={comp['l_abs']:.3e}{mae_str} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e}{grad_mae_str}{curv_mae_str} "
                 + ((" ".join(extra_bits) + " ") if extra_bits else "")
                 + f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
                 + f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}"
@@ -349,7 +357,7 @@ class Trainer:
         """검증, 평균 val loss 반환."""
         self.model.eval()
         total_loss = 0.0
-        comp_sum = {"l_abs": 0.0, "l_dc": 0.0, "l_shape": 0.0}
+        comp_sum = {"l_abs": 0.0, "l_mae": 0.0, "l_dc": 0.0, "l_shape": 0.0, "l_grad_mae": 0.0, "l_curv_mae": 0.0}
         comp_count = 0
         shape_kind_seen = None
         extra_sum = {"d1_err_mean": 0.0, "d1_err_max": 0.0}
@@ -396,10 +404,10 @@ class Trainer:
                     st = {}
                 if shape_kind_seen is None and isinstance(st.get("shape_kind"), str):
                     shape_kind_seen = st.get("shape_kind")
-                if "l_abs" in st and "l_dc" in st and "l_shape" in st:
-                    comp_sum["l_abs"] += float(st["l_abs"])
-                    comp_sum["l_dc"] += float(st["l_dc"])
-                    comp_sum["l_shape"] += float(st["l_shape"])
+                if "l_abs" in st or "l_mae" in st or "l_dc" in st or "l_shape" in st:
+                    for k in comp_sum:
+                        if k in st:
+                            comp_sum[k] += float(st[k])
                     comp_count += 1
                 if "d1_err_mean" in st and "d1_err_max" in st and st["d1_err_mean"] == st["d1_err_mean"]:
                     extra_sum["d1_err_mean"] += float(st["d1_err_mean"])
@@ -454,9 +462,12 @@ class Trainer:
                     f"r_finite={corr['r_finite_frac']:.3f} shape_valid={corr['shape_valid_frac']:.3f} "
                     f"dp_norm_min={corr_min['dp_norm_min']:.3e} dt_norm_min={corr_min['dt_norm_min']:.3e} denom_min={corr_min['denom_min']:.3e}"
                 )
+            mae_str = f" mae={comp['l_mae']:.3e}" if comp.get('l_mae', 0) > 0 else ""
+            grad_mae_str = f" grad_mae={comp['l_grad_mae']:.3e}" if comp.get('l_grad_mae', 0) > 0 else ""
+            curv_mae_str = f" curv_mae={comp['l_curv_mae']:.3e}" if comp.get('l_curv_mae', 0) > 0 else ""
             msg = (
                 "[LOSS_DIAG][val] "
-                f"abs={comp['l_abs']:.3e} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e} "
+                f"abs={comp['l_abs']:.3e}{mae_str} dc={comp['l_dc']:.3e} shape={comp['l_shape']:.3e}{grad_mae_str}{curv_mae_str} "
                 + ((" ".join(extra_bits) + " ") if extra_bits else "")
                 + f"clamp_frac={clamp['frac_clamped']:.3f} low={clamp['frac_low']:.3f} high={clamp['frac_high']:.3f} "
                 + f"sum_mean={clamp['total_mean']:.3e} sum_min={clamp['total_min']:.3e} sum_max={clamp['total_max']:.3e}"
@@ -513,6 +524,18 @@ class Trainer:
                 self.log("[CKPT] loss_fn state restored", also_console=False)
             except Exception as e:
                 self.log(f"[CKPT] loss_fn state load skipped: {e}", also_console=False)
+
+        # Config의 loss weight를 항상 우선 적용 (resume 후에도 config 기준)
+        loss_params = self.cfg["loss"].get("params", {})
+        weight_keys = ("w_mse", "w_mae", "w_rel", "w_grad", "w_grad_mae", "w_curv_mae")
+        for wk in weight_keys:
+            if wk in loss_params and hasattr(self.loss_fn, wk):
+                old_val = getattr(self.loss_fn, wk)
+                new_val = loss_params[wk]
+                if old_val != new_val:
+                    setattr(self.loss_fn, wk, new_val)
+                    self.log(f"[CKPT] loss weight override: {wk} {old_val} -> {new_val}", also_console=True)
+
         self.log(f"[CKPT] loaded from {ckpt_path} (epoch {self.current_epoch})", also_console=True)
 
     def load_weights(self, ckpt_path: str):
@@ -523,6 +546,52 @@ class Trainer:
         ckpt = torch.load(ckpt_path, map_location=self.device)
         self.model.load_state_dict(ckpt["model"])
         self.log(f"[WEIGHTS] loaded model weights from {ckpt_path}", also_console=True)
+
+    def _load_pretrained(self, ckpt_path: str):
+        """
+        Pretrained weight 부분 로드 (transfer learning).
+        - shape이 일치하는 레이어만 로드
+        - shape이 다른 레이어는 랜덤 초기화 유지
+        - optimizer/epoch/loss_fn 상태는 로드하지 않음 (epoch 0부터 새로 시작)
+        """
+        ckpt_path = Path(ckpt_path)
+        if not ckpt_path.exists():
+            self.log(f"[PRETRAINED] checkpoint not found: {ckpt_path}, skipping", also_console=True)
+            return
+
+        ckpt = torch.load(ckpt_path, map_location=self.device)
+        pretrained_dict = ckpt["model"] if "model" in ckpt else ckpt
+
+        model_dict = self.model.state_dict()
+        loaded, skipped = [], []
+
+        for key, param in pretrained_dict.items():
+            if key in model_dict:
+                if param.shape == model_dict[key].shape:
+                    model_dict[key] = param
+                    loaded.append(key)
+                elif (param.dim() == 3 and model_dict[key].dim() == 3
+                      and param.shape[0] == model_dict[key].shape[0]
+                      and param.shape[1] == model_dict[key].shape[1]
+                      and param.shape[2] > model_dict[key].shape[2]):
+                    # Conv1d kernel size 축소: 중앙 부분 잘라서 초기화
+                    # e.g. (256,1,15) -> (256,1,5): 중앙 5개 추출
+                    old_k = param.shape[2]
+                    new_k = model_dict[key].shape[2]
+                    start = (old_k - new_k) // 2
+                    model_dict[key] = param[:, :, start:start + new_k].clone()
+                    loaded.append(f"{key} (center-cropped {old_k}->{new_k})")
+                else:
+                    skipped.append(f"{key} (pretrained={list(param.shape)} vs model={list(model_dict[key].shape)})")
+            else:
+                skipped.append(f"{key} (not in model)")
+
+        self.model.load_state_dict(model_dict)
+        self.log(f"[PRETRAINED] loaded {len(loaded)}/{len(pretrained_dict)} params from {ckpt_path}", also_console=True)
+        if skipped:
+            self.log(f"[PRETRAINED] skipped {len(skipped)} params (shape mismatch or missing):", also_console=True)
+            for s in skipped:
+                self.log(f"  - {s}", also_console=True)
 
     def _parse_log_losses(self):
         """로그 파일에서 이전 train/val loss 히스토리를 복원."""

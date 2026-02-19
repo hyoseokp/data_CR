@@ -5,11 +5,14 @@ Dashboard Hook: Trainer callback
 import numpy as np
 import torch
 
+# 대시보드로 전송할 최대 샘플 수
+MAX_DASHBOARD_SAMPLES = 8
+
 
 class DashboardHook:
     """
     Trainer의 callback으로 등록되는 클래스.
-    매 epoch마다 val sample 1개를 수집하여 대시보드로 전송.
+    매 epoch마다 val/train sample 여러 개를 수집하여 대시보드로 전송.
     """
 
     def __init__(self, trainer):
@@ -21,7 +24,7 @@ class DashboardHook:
     def __call__(self, epoch, train_loss, val_loss, best_val_loss, model, optimizer, trainer):
         """
         Trainer callback signature.
-        매 epoch마다 val 샘플 1개 + train 샘플 1개를 수집하여 대시보드로 전송.
+        매 epoch마다 val/train 샘플 여러 개를 수집하여 대시보드로 전송.
         """
         if not hasattr(trainer, 'dashboard_server') or trainer.dashboard_server is None:
             return
@@ -41,13 +44,13 @@ class DashboardHook:
                     b = min(a + 1, 301)
                 waves.append(float(waves301[a:b].mean()))
 
-            # Val 샘플 추출
-            val_sample = self._extract_sample(trainer, trainer.val_loader, model)
+            # Val 샘플 추출 (여러 개)
+            val_samples = self._extract_samples(trainer, trainer.val_loader, model, MAX_DASHBOARD_SAMPLES)
 
-            # Train 샘플 추출
-            train_sample = self._extract_sample(trainer, trainer.train_loader, model)
+            # Train 샘플 추출 (여러 개)
+            train_samples = self._extract_samples(trainer, trainer.train_loader, model, MAX_DASHBOARD_SAMPLES)
 
-            if val_sample is None or train_sample is None:
+            if not val_samples or not train_samples:
                 return
 
             # Loss component 통계 수집 (dashboard breakdown용)
@@ -60,11 +63,11 @@ class DashboardHook:
             # 현재 실제 loss weight 값 (런타임 변경 반영)
             live_weights = {}
             if hasattr(trainer, 'loss_fn'):
-                for attr in ('w_mse', 'w_rel', 'w_grad'):
+                for attr in ('w_mse', 'w_mae', 'w_rel', 'w_grad', 'w_grad_mae', 'w_curv_mae'):
                     if hasattr(trainer.loss_fn, attr):
                         live_weights[attr] = float(getattr(trainer.loss_fn, attr))
 
-            # 데이터 구성
+            # 데이터 구성 (하위 호환: val/train은 첫 번째 샘플)
             data = {
                 "epoch": int(epoch),
                 "total_epochs": int(trainer.cfg["training"]["epochs"]),
@@ -87,8 +90,10 @@ class DashboardHook:
                     "batch_size": trainer.data_stats["batch_size"],
                 },
                 "samples": {
-                    "val": val_sample,
-                    "train": train_sample,
+                    "val": val_samples[0],          # 하위 호환
+                    "train": train_samples[0],      # 하위 호환
+                    "val_list": val_samples,         # 새 형식: 여러 샘플
+                    "train_list": train_samples,     # 새 형식: 여러 샘플
                     "waves": waves
                 }
             }
@@ -99,58 +104,55 @@ class DashboardHook:
         except Exception as e:
             trainer.log(f"[DASHBOARD HOOK ERROR] {e}", also_console=False)
 
-    def _extract_sample(self, trainer, dataloader, model):
+    def _extract_samples(self, trainer, dataloader, model, num_samples=8):
         """
-        데이터로더에서 첫 번째 배치의 첫 번째 샘플을 추출하고 prediction + error 계산.
+        데이터로더에서 첫 번째 배치의 여러 샘플을 추출하고 prediction + error 계산.
+
+        Args:
+            num_samples: 추출할 최대 샘플 수
 
         Returns:
-            dict with keys: input_struct, gt_bggr, pred_bggr, abs_error_bggr
+            list of dict, 각 dict에 input_struct, gt_bggr, pred_bggr, abs_error_bggr
         """
         try:
-            sample_struct = None
-            sample_gt = None
-            sample_pred = None
-
             with torch.no_grad():
                 for batch_struct, batch_gt in dataloader:
                     batch_struct = batch_struct.to(trainer.device, non_blocking=True)
                     batch_gt = batch_gt.to(trainer.device, non_blocking=True)
 
-                    # 첫 번째 샘플
-                    sample_struct = batch_struct[0].cpu().numpy()
-                    sample_gt = batch_gt[0].cpu().numpy()
+                    n = min(num_samples, batch_struct.size(0))
 
-                    # Model inference
-                    sample_struct_batch = batch_struct[:1]
-                    sample_pred_batch = model(sample_struct_batch)
-                    sample_pred = sample_pred_batch[0].cpu().numpy()
+                    # Model inference (한 번에 n개)
+                    pred_batch = model(batch_struct[:n])
 
-                    break
+                    results = []
+                    for i in range(n):
+                        s_struct = batch_struct[i].cpu().numpy()
+                        s_gt = batch_gt[i].cpu().numpy()
+                        s_pred = pred_batch[i].cpu().numpy()
 
-            if sample_struct is None or sample_gt is None or sample_pred is None:
-                return None
+                        input_struct = s_struct[0].tolist()
 
-            # Input structure: (128, 128) → flat list
-            input_struct = sample_struct[0].tolist()
+                        gt_bggr = [[s_gt[0, 0, :].tolist(), s_gt[0, 1, :].tolist()],
+                                   [s_gt[1, 0, :].tolist(), s_gt[1, 1, :].tolist()]]
 
-            # GT, Pred, Absolute Error (2, 2, 30)
-            gt_bggr = [[sample_gt[0, 0, :].tolist(), sample_gt[0, 1, :].tolist()],
-                       [sample_gt[1, 0, :].tolist(), sample_gt[1, 1, :].tolist()]]
+                        pred_bggr = [[s_pred[0, 0, :].tolist(), s_pred[0, 1, :].tolist()],
+                                     [s_pred[1, 0, :].tolist(), s_pred[1, 1, :].tolist()]]
 
-            pred_bggr = [[sample_pred[0, 0, :].tolist(), sample_pred[0, 1, :].tolist()],
-                         [sample_pred[1, 0, :].tolist(), sample_pred[1, 1, :].tolist()]]
+                        abs_error = np.abs(s_pred - s_gt)
+                        abs_error_bggr = [[abs_error[0, 0, :].tolist(), abs_error[0, 1, :].tolist()],
+                                          [abs_error[1, 0, :].tolist(), abs_error[1, 1, :].tolist()]]
 
-            # Absolute Error: |pred - gt|
-            abs_error = np.abs(sample_pred - sample_gt)
-            abs_error_bggr = [[abs_error[0, 0, :].tolist(), abs_error[0, 1, :].tolist()],
-                              [abs_error[1, 0, :].tolist(), abs_error[1, 1, :].tolist()]]
+                        results.append({
+                            "input_struct": input_struct,
+                            "gt_bggr": gt_bggr,
+                            "pred_bggr": pred_bggr,
+                            "abs_error_bggr": abs_error_bggr
+                        })
 
-            return {
-                "input_struct": input_struct,
-                "gt_bggr": gt_bggr,
-                "pred_bggr": pred_bggr,
-                "abs_error_bggr": abs_error_bggr
-            }
+                    return results if results else None
+
+            return None
 
         except Exception as e:
             trainer.log(f"[SAMPLE EXTRACTION ERROR] {e}", also_console=False)

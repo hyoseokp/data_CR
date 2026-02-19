@@ -109,7 +109,9 @@ class TrainingManager:
             cfg = load_config(config_path)
             cfg_file = Path(config_path).resolve()
             cfg_dir = cfg_file.parent.parent  # CR_recon/
-            outputs_dir = cfg_dir / "outputs"
+            # config에 output.dir이 있으면 사용, 없으면 기본 outputs/
+            out_dir_name = cfg.get("output", {}).get("dir", "outputs")
+            outputs_dir = cfg_dir / out_dir_name
             model_name = cfg["model"]["name"]
             total_epochs = cfg["training"]["epochs"]
 

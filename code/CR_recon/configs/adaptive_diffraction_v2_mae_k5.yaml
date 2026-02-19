@@ -25,16 +25,19 @@ model:
     cnn_dropout: 0.02
     dec_dropout: 0.03
     head_dropout: 0.05
-    wav_conv_kernel: 15
+    wav_conv_kernel: 5          # 15 → 5: 피크 smoothing 방지
     use_circular_padding: true
     use_fourier_mixing: true
 
 loss:
   name: "adaptive_spectral"
   params:
-    w_mse: 2.0
-    w_rel: 0.1
-    w_grad: 100.0
+    w_mse: 0.0
+    w_mae: 2.0
+    w_rel: 0.0
+    w_grad: 0.0
+    w_grad_mae: 10.0
+    w_curv_mae: 50.0
     rel_eps: 1.0e-4
     rel_max: 10.0
     blue_weight: 2.0
@@ -48,6 +51,7 @@ training:
   use_amp: true
   warmup_ratio: 0.05
   save_every: 10
+  pretrained_from: "outputs/cnn_diffraction_epoch_0729.pt"  # 729 epoch 학습된 weight 부분 재사용
 
 dashboard:
   enabled: true
@@ -59,5 +63,5 @@ constraints:
   physical_is_negative: false
 
 output:
-  dir: "outputs/"
+  dir: "outputs_v2_mae_k5/"
   log_file: "train_log.txt"
