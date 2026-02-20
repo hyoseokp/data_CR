@@ -9,7 +9,7 @@ data:
     - "../../data_CR-main/spectra_latest_1.npy"
   out_len: 301
   map_to_pm1: true
-  augment_180: true
+  augment_180: false
   train_ratio: 0.95
   batch_size: 512
   num_workers: 0
@@ -22,9 +22,9 @@ model:
     nhead: 8
     dec_layers: 4
     ff_mult: 4
-    cnn_dropout: 0.02
-    dec_dropout: 0.03
-    head_dropout: 0.05
+    cnn_dropout: 0.0
+    dec_dropout: 0.0
+    head_dropout: 0.0
     wav_conv_kernel: 5          # 15 → 5: 피크 smoothing 방지
     use_circular_padding: true
     use_fourier_mixing: true
@@ -37,7 +37,7 @@ loss:
     w_rel: 0.0
     w_grad: 0.0
     w_grad_mae: 10.0
-    w_curv_mae: 50.0
+    w_curv_mae: 5.0
     rel_eps: 1.0e-4
     rel_max: 10.0
     blue_weight: 2.0
@@ -49,7 +49,7 @@ training:
   weight_decay: 0.005
   grad_clip: 1.0
   use_amp: true
-  warmup_ratio: 0.05
+  warmup_ratio: 0.0
   save_every: 10
   pretrained_from: "outputs/cnn_diffraction_epoch_0729.pt"  # 729 epoch 학습된 weight 부분 재사용
 
